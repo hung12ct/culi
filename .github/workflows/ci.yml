@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Lint, Vet & Test
+    # Pure-Go binary (modernc.org/sqlite — no CGO), so a plain Linux runner
+    # covers everything; there is no platform-specific code here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download modules
+        run: go mod download
+
+      - name: golangci-lint
+        # golangci-lint must be BUILT with go >= go.mod's version, else it
+        # refuses to run. Pin a release built with go >= go.mod's; bump when
+        # go.mod bumps.
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test (race detector)
+        run: go test -race -timeout 3m ./...
