@@ -62,6 +62,12 @@ baseline_budget: 1200  # max tokens injected at session start
 ollama:
   endpoint: http://localhost:11434
   model: nomic-embed-text
+# repos to reconcile with 'culi import' (absolute paths):
+# repos:
+#   - /path/to/repo-a
+#   - /path/to/repo-b
+# import:
+#   merge_model: claude-sonnet-5
 `
 		if err := os.WriteFile(cfgPath, []byte(defaultCfg), 0o644); err != nil {
 			return fmt.Errorf("cli: writing config.yaml: %w", err)
