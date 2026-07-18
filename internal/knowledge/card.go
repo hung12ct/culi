@@ -29,14 +29,41 @@ type Card struct {
 	ContentHash string // sha256 of raw file content
 	TokSummary  int    // estimated tokens, computed at parse time
 	TokBody     int
+
+	// Export links a card back to a generated ~/.claude artifact; nil for
+	// cards that are knowledge-only. Provenance records where imported or
+	// learned content came from. Neither is stored in the SQLite index —
+	// files are truth, and only `culi import`/`culi export` read them.
+	Export     *ExportMeta
+	Provenance *Provenance
+}
+
+// ExportMeta describes how `culi export` regenerates a Claude Code agent or
+// skill file from this card. Frontmatter is the verbatim YAML block of the
+// original artifact (without --- delimiters) so exports round-trip exactly.
+type ExportMeta struct {
+	Kind        string   `yaml:"kind"` // agent | skill
+	Name        string   `yaml:"name"` // basename in ~/.claude/agents or ~/.claude/skills
+	Frontmatter string   `yaml:"frontmatter,omitempty"`
+	Attachments []string `yaml:"attachments,omitempty"` // skill sibling files, dir-relative
+}
+
+// Provenance records the origin of imported or learned content.
+type Provenance struct {
+	Source     string   `yaml:"source,omitempty"`      // import | learn | manual
+	MergedFrom []string `yaml:"merged_from,omitempty"` // contributing repo names
+	Model      string   `yaml:"model,omitempty"`       // LLM used, if any
 }
 
 // Triggers pin a card to the top of the ranked list when matched (max 2 pins
 // per injection, enforced by the retriever).
 type Triggers struct {
-	Keywords []string `yaml:"keywords"`
-	Globs    []string `yaml:"globs"`
+	Keywords []string `yaml:"keywords,omitempty"`
+	Globs    []string `yaml:"globs,omitempty"`
 }
+
+// IsZero lets yaml omitempty drop an empty triggers block when rendering.
+func (t Triggers) IsZero() bool { return len(t.Keywords) == 0 && len(t.Globs) == 0 }
 
 // NarrowestScopeRank returns the precedence rank of the card's narrowest
 // in-scope scope: branch(3) > repo(2) > lang(1) > global/dir(0). Used for

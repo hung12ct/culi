@@ -13,16 +13,18 @@ import (
 // compatibility); missing optional fields default. Only Title is required —
 // everything else degrades.
 type frontmatter struct {
-	ID       string   `yaml:"id"`
-	Type     string   `yaml:"type"`
-	Title    string   `yaml:"title"`
-	Summary  string   `yaml:"summary"`
-	Scope    []string `yaml:"scope"`
-	Key      string   `yaml:"key"`
-	Triggers Triggers `yaml:"triggers"`
-	Aliases  []string `yaml:"aliases"`
-	Baseline bool     `yaml:"baseline"`
-	Status   string   `yaml:"status"`
+	ID         string      `yaml:"id,omitempty"`
+	Type       string      `yaml:"type,omitempty"`
+	Title      string      `yaml:"title,omitempty"`
+	Summary    string      `yaml:"summary,omitempty"`
+	Scope      []string    `yaml:"scope,omitempty"`
+	Key        string      `yaml:"key,omitempty"`
+	Triggers   Triggers    `yaml:"triggers,omitempty"`
+	Aliases    []string    `yaml:"aliases,omitempty"`
+	Baseline   bool        `yaml:"baseline,omitempty"`
+	Status     string      `yaml:"status,omitempty"`
+	Export     *ExportMeta `yaml:"export,omitempty"`
+	Provenance *Provenance `yaml:"provenance,omitempty"`
 }
 
 var fmDelim = []byte("---")
@@ -56,6 +58,8 @@ func Parse(relPath string, raw []byte) (Card, error) {
 		Baseline:    meta.Baseline,
 		Status:      meta.Status,
 		ContentHash: hashContent(raw),
+		Export:      meta.Export,
+		Provenance:  meta.Provenance,
 	}
 	if c.ID == "" {
 		c.ID = defaultID(relPath)
