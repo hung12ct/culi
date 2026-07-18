@@ -22,6 +22,11 @@ linters:
         - fmt.Fprintln # writes to bufio.Writer / buffers / ResponseWriter
         - os.Remove # temp-file / partial-artifact cleanup on an error path
         - os.RemoveAll # best-effort scratch-dir cleanup
+        - (*database/sql.DB).Close # cleanup on error paths / process exit
+        - (*database/sql.Tx).Rollback # defer after Commit returns ErrTxDone by design
+        - (*database/sql.Rows).Close # defer rows.Close
+        - (*database/sql.Stmt).Close # defer stmt.Close
+        - (*github.com/hung12ct/culi/internal/store.Store).Close # wraps db.Close; same rationale
   exclusions:
     rules:
       # Test setup routinely ignores errors from helpers; checking them adds
