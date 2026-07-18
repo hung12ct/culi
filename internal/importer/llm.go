@@ -3,11 +3,8 @@ package importer
 // The one file in the hot-path-free importer that touches gopheragent: a
 // single structured-output call per diverged cluster / CLAUDE.md, no agent
 // loop (plan §import). Everything here is behind the Merger seam so tests
-// and the mechanical path never load a provider.
-//
-// Importing pkg/llm statically links all three provider SDKs (binary
-// 15→30 MB); accepted for now — see gopheragent BACKLOG.md "reported by
-// Culi (2026-07-19)" for the upstream per-provider-subpackage split.
+// and the mechanical path never load a provider. pkg/llm/anthropic (v0.33.0
+// per-provider split) links only the Anthropic SDK — keeps the binary lean.
 
 import (
 	"context"
@@ -16,7 +13,7 @@ import (
 
 	"github.com/hung12ct/gopheragent/pkg/agent"
 	"github.com/hung12ct/gopheragent/pkg/history"
-	"github.com/hung12ct/gopheragent/pkg/llm"
+	"github.com/hung12ct/gopheragent/pkg/llm/anthropic"
 )
 
 // LLMMerger implements Merger with one Anthropic structured-output call per
@@ -27,9 +24,10 @@ type LLMMerger struct {
 }
 
 // NewLLMMerger builds a merger on ANTHROPIC_API_KEY (env) and the configured
-// model.
+// model. Temperature 0: re-running a merge should stage the same diff, so
+// review conclusions survive a re-run (best-effort — Anthropic has no seed).
 func NewLLMMerger(model string) (*LLMMerger, error) {
-	p, err := llm.NewAnthropicProvider("", model, llm.WithMaxTokens(16384))
+	p, err := anthropic.New("", model, anthropic.WithMaxTokens(16384), anthropic.WithTemperature(0))
 	if err != nil {
 		return nil, fmt.Errorf("importer: creating merge provider: %w", err)
 	}
