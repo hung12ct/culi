@@ -21,6 +21,8 @@ Usage:
   culi index [--full]           sync knowledge/ into the SQLite index
   culi query [--timing] <text>  debug retrieval from the terminal
   culi card list|show|rm <id>   inspect the card store
+  culi import scan|merge|apply  reconcile drifted .claude dirs into the store
+  culi export [--check]         regenerate ~/.claude agents/skills from cards
 `
 
 func main() {
@@ -40,6 +42,10 @@ func main() {
 		exit(cli.Query(os.Args[2:]))
 	case "card":
 		exit(cli.Card(os.Args[2:]))
+	case "import":
+		exit(cli.Import(os.Args[2:]))
+	case "export":
+		exit(cli.Export(os.Args[2:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
