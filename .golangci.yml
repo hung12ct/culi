@@ -1,0 +1,31 @@
+version: "2"
+
+# Report every finding — the defaults (max-same-issues: 3,
+# max-issues-per-linter: 50) silently hide repeats, which masks the true count.
+# Mirrors phin and the gopheragent sibling project.
+issues:
+  max-same-issues: 0
+  max-issues-per-linter: 0
+
+# Default linter set (errcheck, govet, ineffassign, staticcheck, unused). Only
+# the errcheck exclusions below are customized.
+linters:
+  settings:
+    errcheck:
+      # Conventional "safe to ignore" calls: the returned error is not
+      # actionable at the call site.
+      exclude-functions:
+        - (io.Closer).Close # interface-typed Close (e.g. resp.Body, files)
+        - (*os.File).Close # defer file/tmpFile Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln # writes to bufio.Writer / buffers / ResponseWriter
+        - os.Remove # temp-file / partial-artifact cleanup on an error path
+        - os.RemoveAll # best-effort scratch-dir cleanup
+  exclusions:
+    rules:
+      # Test setup routinely ignores errors from helpers; checking them adds
+      # noise without value.
+      - path: _test\.go
+        linters:
+          - errcheck
