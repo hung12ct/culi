@@ -26,6 +26,18 @@ type Config struct {
 	ExtraAcks []string `yaml:"extra_acks"`
 	// ExtraStopwords extends the built-in stopword packs.
 	ExtraStopwords []string `yaml:"extra_stopwords"`
+	// Repos lists absolute paths of repositories whose .claude directories
+	// and CLAUDE.md files `culi import` reconciles into the canonical store.
+	Repos []string `yaml:"repos"`
+	// Import configures the drift-reconcile pipeline.
+	Import ImportConfig `yaml:"import"`
+}
+
+// ImportConfig tunes `culi import merge`.
+type ImportConfig struct {
+	// MergeModel is the Anthropic model used to reconcile diverged clusters
+	// and decompose CLAUDE.md files. Needs ANTHROPIC_API_KEY at merge time.
+	MergeModel string `yaml:"merge_model"`
 }
 
 // OllamaConfig points at the local embedding server.
@@ -41,6 +53,7 @@ const (
 	defaultBaselineBudget = 1200
 	defaultOllamaEndpoint = "http://localhost:11434"
 	defaultOllamaModel    = "nomic-embed-text"
+	defaultMergeModel     = "claude-sonnet-5"
 )
 
 // BaseDir returns the culi home directory: $CULI_HOME if set, else ~/.culi.
@@ -67,12 +80,17 @@ func LogDir(base string) string { return filepath.Join(base, "logs") }
 // InboxDir returns the learn-queue directory under base.
 func InboxDir(base string) string { return filepath.Join(base, "inbox") }
 
+// StateDir returns the directory for culi-internal state (export manifest,
+// learning ledgers) under base.
+func StateDir(base string) string { return filepath.Join(base, "state") }
+
 // Load reads base/config.yaml. A missing file is not an error: defaults apply.
 func Load(base string) (Config, error) {
 	cfg := Config{
 		PushBudget:     defaultPushBudget,
 		BaselineBudget: defaultBaselineBudget,
 		Ollama:         OllamaConfig{Endpoint: defaultOllamaEndpoint, Model: defaultOllamaModel},
+		Import:         ImportConfig{MergeModel: defaultMergeModel},
 	}
 	raw, err := os.ReadFile(filepath.Join(base, "config.yaml"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -95,6 +113,9 @@ func Load(base string) (Config, error) {
 	}
 	if cfg.Ollama.Model == "" {
 		cfg.Ollama.Model = defaultOllamaModel
+	}
+	if cfg.Import.MergeModel == "" {
+		cfg.Import.MergeModel = defaultMergeModel
 	}
 	return cfg, nil
 }
