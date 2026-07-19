@@ -11,11 +11,18 @@ import (
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/pack"
 	"github.com/hung12ct/culi/internal/retrieve"
 	"github.com/hung12ct/culi/internal/store"
 )
+
+// sessionStartEmbedBudget bounds the inline embedding pass at SessionStart:
+// enough for a handful of changed cards, far under the outer hook timeout.
+// The per-prompt path never embeds cards — only the query (100ms, in
+// retrieve).
+const sessionStartEmbedBudget = 2 * time.Second
 
 // handle dispatches one event and returns the additionalContext ("" = inject
 // nothing). Errors bubble to Run's fail-open wrapper.
@@ -26,7 +33,7 @@ func handle(ctx context.Context, base, event string, in Input) (string, error) {
 	case "session-start":
 		return handleSessionStart(ctx, base, in)
 	case "session-end":
-		return "", handleSessionEnd(base, in)
+		return "", handleSessionEnd(ctx, base, in)
 	}
 	return "", fmt.Errorf("hook: unhandled event %q", event)
 }
@@ -54,7 +61,11 @@ func handlePrompt(ctx context.Context, base string, in Input) (string, error) {
 	}
 
 	sc := retrieve.DetectScope(in.CWD)
-	r := &retrieve.Retriever{Store: s}
+	r := &retrieve.Retriever{
+		Store:    s,
+		Embedder: embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model),
+		Model:    cfg.Ollama.Model,
+	}
 	cands, err := r.Retrieve(ctx, gate.Query, sc)
 	if err != nil {
 		return "", err
@@ -102,6 +113,14 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 	if _, err := indexer.Sync(ctx, s, config.KnowledgeDir(base)); err != nil {
 		return "", err
 	}
+	// Vectors for new/changed cards, bounded and best-effort: a dead Ollama
+	// must never delay session start (C1) — BM25 covers the gap.
+	ectx, cancel := context.WithTimeout(ctx, sessionStartEmbedBudget)
+	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model)
+	if _, err := indexer.EmbedMissing(ectx, s, e, cfg.Ollama.Model); err != nil {
+		logf(base, "session-start: embed: %v", err) // non-fatal
+	}
+	cancel()
 	// Bound the disposable history while we're here (7-day retention).
 	if err := s.PruneStale(ctx, 7); err != nil {
 		logf(base, "session-start: prune: %v", err) // non-fatal
@@ -138,9 +157,18 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 	return inj.Render(), nil
 }
 
-// handleSessionEnd enqueues the transcript for the Phase 4 learn worker —
-// cheap file write, no LLM, no parsing (learning never runs in a hook).
-func handleSessionEnd(base string, in Input) error {
+// handleSessionEnd folds utility feedback (pointers injected but never
+// expanded) and enqueues the transcript for the Phase 4 learn worker — cheap
+// writes, no LLM, no parsing (learning never runs in a hook).
+func handleSessionEnd(ctx context.Context, base string, in Input) error {
+	if in.SessionID != "" {
+		if s, err := store.Open(ctx, config.DBPath(base)); err == nil {
+			if err := s.PenalizeAbandonedPointers(ctx, in.SessionID); err != nil {
+				logf(base, "session-end: pointer penalty: %v", err) // non-fatal
+			}
+			s.Close()
+		}
+	}
 	if in.TranscriptPath == "" {
 		return nil
 	}
