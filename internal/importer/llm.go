@@ -1,53 +1,60 @@
 package importer
 
-// The one file in the hot-path-free importer that touches gopheragent: a
-// single structured-output call per diverged cluster / CLAUDE.md, no agent
-// loop (plan §import). Everything here is behind the Merger seam so tests
-// and the mechanical path never load a provider. pkg/llm/anthropic (v0.33.0
-// per-provider split) links only the Anthropic SDK — keeps the binary lean.
+// The importer's LLM work is one structured-output call per diverged cluster /
+// CLAUDE.md, no agent loop (plan §import). The multi-backend transport lives
+// in internal/llmgen; everything here is behind the Merger seam so tests and
+// the mechanical path never load a provider.
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
-	"github.com/hung12ct/gopheragent/pkg/agent"
-	"github.com/hung12ct/gopheragent/pkg/history"
-	"github.com/hung12ct/gopheragent/pkg/llm/anthropic"
+	"github.com/hung12ct/culi/internal/llmgen"
 )
 
-// generator is the one-call seam every merge backend implements: anthropic
-// API (this file), the claude CLI (claudecli.go), local Ollama (ollamallm.go).
-// The merge/decompose logic above them is shared via GenMerger.
-type generator interface {
-	generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error)
-	ModelName() string
-}
-
-// GenMerger implements Merger over any generator backend.
+// GenMerger implements Merger over any llmgen backend.
 type GenMerger struct {
-	gen generator
+	gen llmgen.Generator
 }
 
 // ModelName reports the backend's model for provenance frontmatter.
 func (m *GenMerger) ModelName() string { return m.gen.ModelName() }
 
-// anthropicGen calls the Anthropic API via gopheragent — the strongest
-// backend: the schema is enforced server-side as a forced tool call.
-type anthropicGen struct {
-	provider agent.LLMProvider
-	model    string
-}
-
 // NewLLMMerger builds a merger on ANTHROPIC_API_KEY (env) and the configured
-// model. Temperature 0: re-running a merge should stage the same diff, so
-// review conclusions survive a re-run (best-effort — Anthropic has no seed).
+// model.
 func NewLLMMerger(model string) (*GenMerger, error) {
-	p, err := anthropic.New("", model, anthropic.WithMaxTokens(16384), anthropic.WithTemperature(0))
+	g, err := llmgen.NewAnthropic(model)
 	if err != nil {
 		return nil, fmt.Errorf("importer: creating merge provider: %w", err)
 	}
-	return &GenMerger{gen: &anthropicGen{provider: p, model: model}}, nil
+	return &GenMerger{gen: g}, nil
+}
+
+// NewCLIMerger builds a merger on the claude CLI found in PATH — zero API key,
+// billed to the user's existing subscription.
+func NewCLIMerger(model string) (*GenMerger, error) {
+	g, err := llmgen.NewCLI(model)
+	if err != nil {
+		return nil, fmt.Errorf("importer: %w", err)
+	}
+	return &GenMerger{gen: g}, nil
+}
+
+// NewOllamaMerger builds a merger on a local Ollama chat model (a GENERATION
+// model, e.g. qwen3 — not the embedding model).
+func NewOllamaMerger(endpoint, model string) *GenMerger {
+	return &GenMerger{gen: llmgen.NewOllama(endpoint, model)}
+}
+
+// generate delegates one call to the backend and converts usage.
+func (m *GenMerger) generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error) {
+	u, err := m.gen.Generate(ctx, system, user, name, schema, out)
+	usage := Usage{Prompt: u.Prompt, Completion: u.Completion}
+	if err != nil {
+		return usage, fmt.Errorf("importer: llm call %s: %w", name, err)
+	}
+	return usage, nil
 }
 
 const mergeSystem = `You reconcile N drifted copies of the same Claude Code %s definition ("%s") into one canonical version.
@@ -81,7 +88,7 @@ func (m *GenMerger) MergeCluster(ctx context.Context, in ClusterInput) (ClusterM
 		fmt.Fprintf(&b, "### copy from repo %q\n\n%s\n\n", c.Repo, c.Body)
 	}
 	var out clusterMergeOut
-	usage, err := m.gen.generate(ctx, fmt.Sprintf(mergeSystem, in.Kind, in.Name), b.String(), "cluster_merge", clusterMergeSchema(), &out)
+	usage, err := m.generate(ctx, fmt.Sprintf(mergeSystem, in.Kind, in.Name), b.String(), "cluster_merge", clusterMergeSchema(), &out)
 	if err != nil {
 		return ClusterMerge{}, err
 	}
@@ -129,7 +136,7 @@ type decomposeOut struct {
 // DecomposeClaudeMD splits one CLAUDE.md into cards + residual.
 func (m *GenMerger) DecomposeClaudeMD(ctx context.Context, in ClaudeMDInput) (Decomposition, error) {
 	var out decomposeOut
-	usage, err := m.gen.generate(ctx, fmt.Sprintf(decomposeSystem, in.Repo, in.Repo), in.Content, "claudemd_decomposition", decomposeSchema(), &out)
+	usage, err := m.generate(ctx, fmt.Sprintf(decomposeSystem, in.Repo, in.Repo), in.Content, "claudemd_decomposition", decomposeSchema(), &out)
 	if err != nil {
 		return Decomposition{}, err
 	}
@@ -144,25 +151,6 @@ func (m *GenMerger) DecomposeClaudeMD(ctx context.Context, in ClaudeMDInput) (De
 		})
 	}
 	return res, nil
-}
-
-// ModelName reports the configured model.
-func (g *anthropicGen) ModelName() string { return g.model }
-
-// generate runs one structured-output call and decodes into out.
-func (g *anthropicGen) generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error) {
-	result, err := agent.GenerateJSONInto(ctx, g.provider, agent.GenerateJSONRequest{
-		Messages: []history.Message{
-			{Role: "system", Content: system},
-			{Role: "user", Content: user},
-		},
-		Output: agent.StructuredOutput{Name: name, Schema: schema, Strict: true},
-	}, out)
-	usage := Usage{Prompt: result.Usage.PromptTokens, Completion: result.Usage.CompletionTokens}
-	if err != nil {
-		return usage, fmt.Errorf("importer: llm call %s: %w", name, err)
-	}
-	return usage, nil
 }
 
 func clusterMergeSchema() map[string]any {
