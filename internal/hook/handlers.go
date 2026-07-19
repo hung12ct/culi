@@ -198,8 +198,13 @@ func handleSessionEnd(ctx context.Context, base string, in Input) error {
 // spawnLearnWorker starts `culi learn --auto` detached: mining never runs in
 // a hook (plan §learning A) and the worker self-limits (lockfile, throttle,
 // spend caps). Best-effort — a spawn failure only delays learning until the
-// next session end.
+// next session end. CULI_NO_LEARN_SPAWN disables the spawn entirely: users
+// who prefer manual `culi learn`, and tests, where os.Executable is the test
+// binary and re-executing it would fork the whole suite.
 func spawnLearnWorker(base string) {
+	if os.Getenv("CULI_NO_LEARN_SPAWN") != "" {
+		return
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		logf(base, "session-end: resolving executable: %v", err)
