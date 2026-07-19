@@ -47,6 +47,18 @@ func (s *Store) SessionCount(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// SessionTokens sums the tokens injected into one session — the statusline's
+// "what did this session cost so far" number.
+func (s *Store) SessionTokens(ctx context.Context, sessionID string) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx,
+		"SELECT COALESCE(SUM(tokens), 0) FROM injections WHERE session_id = ?",
+		sessionID).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: summing session tokens: %w", err)
+	}
+	return n, nil
+}
+
 // InjectedCardIDs returns the set of card IDs with at least one row in the
 // injection log's retention window — the "was this card ever shown" half of
 // the staleness report.

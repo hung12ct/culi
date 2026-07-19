@@ -204,6 +204,20 @@ func registerHooks() (changed bool, err error) {
 		hooks[ev.name] = append(list, group)
 		changed = true
 	}
+
+	// Statusline: register only when the user has none — an existing
+	// statusLine is user content (C4); they append `culi statusline` to their
+	// own script instead.
+	if _, exists := settings["statusLine"]; !exists {
+		settings["statusLine"] = map[string]any{"type": "command", "command": exe + " statusline"}
+		changed = true
+		fmt.Println("status:   statusline registered (live card/token/review segment)")
+	} else if sl, _ := settings["statusLine"].(map[string]any); sl != nil {
+		if cmd, _ := sl["command"].(string); !strings.Contains(cmd, "culi") {
+			fmt.Println("status:   you already have a statusLine — append `culi statusline` output to it for the culi segment")
+		}
+	}
+
 	if !changed {
 		return false, nil
 	}
