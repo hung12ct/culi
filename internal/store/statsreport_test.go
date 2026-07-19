@@ -24,6 +24,10 @@ func TestInjectionAggsAndSessionCount(t *testing.T) {
 	if err != nil || n != 2 {
 		t.Fatalf("sessions = %d, err %v", n, err)
 	}
+	injected, err := s.InjectedCardIDs(ctx)
+	if err != nil || !injected["a"] || !injected["b"] || len(injected) != 2 {
+		t.Fatalf("injected = %v, err %v", injected, err)
+	}
 	aggs, err := s.InjectionAggs(ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -45,13 +45,22 @@ func Init(args []string) error {
 	}
 	fmt.Printf("store:    %s\n", base)
 
-	// knowledge/ is git-init'd so LLM merges and learning are always revertible.
+	// knowledge/ is git-init'd so LLM merges and learning are always revertible;
+	// the pipelines auto-commit with structured messages (the governance trail).
 	kdir := config.KnowledgeDir(base)
 	if _, err := os.Stat(filepath.Join(kdir, ".git")); errors.Is(err, os.ErrNotExist) {
 		if out, err := exec.Command("git", "-C", kdir, "init", "-q").CombinedOutput(); err != nil {
 			fmt.Printf("warning:  git init failed (%v: %s) — knowledge history disabled\n", err, out)
 		} else {
 			fmt.Printf("git:      initialized %s\n", kdir)
+		}
+	}
+	// Staged-but-unreviewed import content is not knowledge yet: keep it out
+	// of both auto-commits and any hand-run `git add -A`.
+	kIgnore := filepath.Join(kdir, ".gitignore")
+	if _, err := os.Stat(kIgnore); errors.Is(err, os.ErrNotExist) {
+		if err := os.WriteFile(kIgnore, []byte(".import/\n.drafts/\n"), 0o644); err != nil {
+			fmt.Printf("warning:  writing knowledge/.gitignore: %v\n", err)
 		}
 	}
 

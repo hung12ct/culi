@@ -176,6 +176,7 @@ func (s *Server) saveLesson(ctx context.Context, _ *mcp.CallToolRequest, in save
 	_, _ = indexer.EmbedMissing(ectx, s.store, s.emb, s.cfg.Ollama.Model)
 
 	id := strings.TrimSuffix(filepath.ToSlash(rel), ".md")
+	_ = knowledge.Commit(kdir, "mcp: save_lesson "+id) // governance trail, best-effort
 	return nil, saveOut{ID: id, Path: abs}, nil
 }
 

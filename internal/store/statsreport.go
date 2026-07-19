@@ -46,6 +46,26 @@ func (s *Store) SessionCount(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// InjectedCardIDs returns the set of card IDs with at least one row in the
+// injection log's retention window — the "was this card ever shown" half of
+// the staleness report.
+func (s *Store) InjectedCardIDs(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT DISTINCT card_id FROM injections")
+	if err != nil {
+		return nil, fmt.Errorf("store: listing injected cards: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: scanning injected card: %w", err)
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
+
 // AllCardStats returns every card's counters decayed to now — the raw
 // material for stats' top-pulled / noisy lists. Off the hot path.
 func (s *Store) AllCardStats(ctx context.Context, now time.Time) (map[string]CardStats, error) {

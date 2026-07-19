@@ -11,6 +11,7 @@ import (
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/importer"
 	"github.com/hung12ct/culi/internal/indexer"
+	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/store"
 )
 
@@ -179,6 +180,8 @@ func importApply(args []string) error {
 			return err
 		}
 		fmt.Printf("\nindexed: %d upserted, %d skipped\n", sync.Upserted, len(sync.Skipped))
+		// Governance trail, best-effort.
+		_ = knowledge.Commit(kdir, fmt.Sprintf("import: applied %d reviewed cards", len(res.Applied)))
 	}
 	return nil
 }

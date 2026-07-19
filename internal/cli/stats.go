@@ -117,6 +117,45 @@ func printCards(ctx context.Context, s *store.Store) {
 		printTop(stats, "top pulled", func(cs store.CardStats) float64 { return 3*cs.Expanded + 5*cs.Referenced })
 		printTop(stats, "noisy", func(cs store.CardStats) float64 { return cs.Downvoted })
 	}
+	printStale(ctx, s, cards, stats)
+	fmt.Println()
+}
+
+// printStale lists live cards that were never injected in the retention
+// window and show no decayed pull activity — the "does anyone still need
+// this" governance view. Staleness is informational: a card can be dormant
+// simply because its topic didn't come up.
+func printStale(ctx context.Context, s *store.Store, cards []store.StoredCard, stats map[string]store.CardStats) {
+	injected, err := s.InjectedCardIDs(ctx)
+	if err != nil {
+		return
+	}
+	var stale []string
+	for _, c := range cards {
+		if c.Status == "candidate" || c.Status == "retired" {
+			continue // not expected to inject
+		}
+		if injected[c.ID] {
+			continue
+		}
+		if cs, ok := stats[c.ID]; ok && cs.Expanded+cs.Referenced > 0.1 {
+			continue // pulled via MCP even if never pushed
+		}
+		stale = append(stale, c.ID)
+	}
+	if len(stale) == 0 {
+		return
+	}
+	sort.Strings(stale)
+	shown := stale
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	fmt.Printf("  stale              %d live card(s) with no injection or pull in the window: %s",
+		len(stale), strings.Join(shown, ", "))
+	if len(stale) > len(shown) {
+		fmt.Printf(", … (+%d)", len(stale)-len(shown))
+	}
 	fmt.Println()
 }
 

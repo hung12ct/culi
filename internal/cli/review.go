@@ -54,6 +54,7 @@ func Review(args []string) error {
 				return err
 			}
 			fmt.Printf("rejected %s (retired)\n", *reject)
+			_ = knowledge.Commit(kdir, "review: rejected "+*reject)
 		}
 		_, err := indexer.Sync(ctx, s, kdir)
 		return err
@@ -126,6 +127,7 @@ func interactiveReview(ctx context.Context, s *store.Store, kdir string, cands [
 					return err
 				}
 				fmt.Printf("rejected %s (retired)\n", c.ID)
+				_ = knowledge.Commit(kdir, "review: rejected "+c.ID)
 				acted = true
 			case "s", "":
 			case "b":
@@ -152,6 +154,7 @@ func approveOne(ctx context.Context, s *store.Store, kdir, id string) error {
 	if retired != "" {
 		fmt.Printf("retired  %s (superseded)\n", retired)
 	}
+	_ = knowledge.Commit(kdir, "review: approved "+id) // governance trail
 	return nil
 }
 
