@@ -18,6 +18,7 @@ import (
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/learn/llmtier"
 	"github.com/hung12ct/culi/internal/learn/mine"
+	"github.com/hung12ct/culi/internal/learn/patterns"
 	"github.com/hung12ct/culi/internal/learn/queue"
 	"github.com/hung12ct/culi/internal/learn/style"
 	"github.com/hung12ct/culi/internal/llmgen"
@@ -39,7 +40,8 @@ type Summary struct {
 	Confirmed  []string
 	Retired    []string
 	StyleObs   int
-	Style      style.Result // pipeline B synthesis, when it fired
+	Style      style.Result    // pipeline B synthesis, when it fired
+	Patterns   patterns.Result // pipeline D branch index
 	Usage      llmgen.Usage
 	Notes      []string
 	Capped     bool
@@ -175,8 +177,20 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		}
 	}
 
+	// Pipeline D: branch-tip pattern index over the configured repos. Tips
+	// comparison is milliseconds of git; unmoved repos cost nothing.
+	if !sum.Capped {
+		pr := &patterns.Runner{Base: base, Store: s, Tier: tier, Logf: logf}
+		pres, err := pr.Run(ctx, cfg.Repos)
+		sum.Patterns = pres
+		sum.Usage.Add(pres.Usage)
+		if err != nil {
+			sum.Notes = append(sum.Notes, "pattern index: "+firstNoteLine(err))
+		}
+	}
+
 	// Vectors for anything new, so next run's dedup can use the embed arm.
-	if len(sum.Created)+len(sum.Style.Created) > 0 || len(sum.Reinforced) > 0 {
+	if len(sum.Created)+len(sum.Style.Created)+len(sum.Patterns.Created) > 0 || len(sum.Reinforced) > 0 {
 		ectx, cancel := context.WithTimeout(ctx, embedBudget)
 		_, _ = indexer.EmbedMissing(ectx, s, e, cfg.Ollama.Model)
 		cancel()
