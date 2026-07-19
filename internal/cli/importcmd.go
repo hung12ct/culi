@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
@@ -82,12 +83,14 @@ func printScan(rep importer.Report) {
 		counts["identical"], counts["superset"], counts["diverged"], counts["unique"], len(rep.ClaudeMD))
 }
 
-// importMerge stages canonical cards; diverged clusters and CLAUDE.md need
-// ANTHROPIC_API_KEY (or --no-llm to stage the mechanical part only).
+// importMerge stages canonical cards. Diverged clusters and CLAUDE.md need a
+// merge backend — resolved from config/flags, defaulting to whatever the user
+// already has (API key, claude CLI subscription, or local Ollama).
 func importMerge(args []string) error {
 	fs := flag.NewFlagSet("import merge", flag.ContinueOnError)
 	force := fs.Bool("force", false, "overwrite an existing non-empty staging area")
 	noLLM := fs.Bool("no-llm", false, "mechanical merge only; skip diverged clusters and CLAUDE.md decomposition")
+	provider := fs.String("provider", "", "merge backend: auto|anthropic|claude-cli|ollama|none (default: import.provider)")
 	model := fs.String("model", "", "override import.merge_model")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
@@ -101,23 +104,22 @@ func importMerge(args []string) error {
 	if err != nil {
 		return err
 	}
-	var m importer.Merger
-	if !*noLLM {
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			fmt.Println("note: ANTHROPIC_API_KEY not set — mechanical merge only")
-		} else {
-			mm := cfg.Import.MergeModel
-			if *model != "" {
-				mm = *model
-			}
-			lm, err := importer.NewLLMMerger(mm)
-			if err != nil {
-				return err
-			}
-			m = lm
-			fmt.Printf("llm:    %s\n", mm)
-		}
+	prov := cfg.Import.Provider
+	if *provider != "" {
+		prov = *provider
 	}
+	if *noLLM {
+		prov = "none"
+	}
+	mm := cfg.Import.MergeModel
+	if *model != "" {
+		mm = *model
+	}
+	m, desc, err := resolveMerger(prov, mm, cfg.Ollama.Endpoint)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("merge:  %s\n", desc)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 	res, err := importer.Merge(ctx, kdir, rep, m, *force)
@@ -179,6 +181,50 @@ func importApply(args []string) error {
 		fmt.Printf("\nindexed: %d upserted, %d skipped\n", sync.Upserted, len(sync.Skipped))
 	}
 	return nil
+}
+
+// resolveMerger picks the merge backend. "auto" prefers the strongest thing
+// the user already has and never errors — worst case is a mechanical merge
+// with a note listing the options. Explicit providers DO error when their
+// prerequisite is missing (the user asked for that one specifically).
+func resolveMerger(provider, model, ollamaEndpoint string) (importer.Merger, string, error) {
+	switch provider {
+	case "none":
+		return nil, "mechanical only (diverged clusters and CLAUDE.md left for a later run)", nil
+	case "anthropic":
+		if os.Getenv("ANTHROPIC_API_KEY") == "" {
+			return nil, "", fmt.Errorf("cli: provider anthropic needs ANTHROPIC_API_KEY (or use --provider claude-cli / ollama)")
+		}
+		m, err := importer.NewLLMMerger(model)
+		if err != nil {
+			return nil, "", err
+		}
+		return m, model + " via Anthropic API", nil
+	case "claude-cli":
+		m, err := importer.NewCLIMerger(model)
+		if err != nil {
+			return nil, "", err
+		}
+		return m, model + " via claude CLI (uses your Claude subscription, no API key)", nil
+	case "ollama":
+		if strings.HasPrefix(model, "claude") {
+			return nil, "", fmt.Errorf("cli: provider ollama needs a local generation model — set import.merge_model (e.g. qwen3), not %q", model)
+		}
+		return importer.NewOllamaMerger(ollamaEndpoint, model), model + " via local Ollama (free)", nil
+	case "auto", "":
+		if os.Getenv("ANTHROPIC_API_KEY") != "" {
+			if m, err := importer.NewLLMMerger(model); err == nil {
+				return m, model + " via Anthropic API (auto)", nil
+			}
+		}
+		if m, err := importer.NewCLIMerger(model); err == nil {
+			return m, model + " via claude CLI (auto — uses your Claude subscription)", nil
+		}
+		return nil, "mechanical only — no backend found. Options: set ANTHROPIC_API_KEY, " +
+			"install the claude CLI, or set import.provider: ollama with a local model", nil
+	default:
+		return nil, "", fmt.Errorf("cli: unknown merge provider %q (want auto|anthropic|claude-cli|ollama|none)", provider)
+	}
 }
 
 // loadBase resolves the culi home and its config in one step.

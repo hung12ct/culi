@@ -16,9 +16,25 @@ import (
 	"github.com/hung12ct/gopheragent/pkg/llm/anthropic"
 )
 
-// LLMMerger implements Merger with one Anthropic structured-output call per
-// task via gopheragent.
-type LLMMerger struct {
+// generator is the one-call seam every merge backend implements: anthropic
+// API (this file), the claude CLI (claudecli.go), local Ollama (ollamallm.go).
+// The merge/decompose logic above them is shared via GenMerger.
+type generator interface {
+	generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error)
+	ModelName() string
+}
+
+// GenMerger implements Merger over any generator backend.
+type GenMerger struct {
+	gen generator
+}
+
+// ModelName reports the backend's model for provenance frontmatter.
+func (m *GenMerger) ModelName() string { return m.gen.ModelName() }
+
+// anthropicGen calls the Anthropic API via gopheragent — the strongest
+// backend: the schema is enforced server-side as a forced tool call.
+type anthropicGen struct {
 	provider agent.LLMProvider
 	model    string
 }
@@ -26,16 +42,13 @@ type LLMMerger struct {
 // NewLLMMerger builds a merger on ANTHROPIC_API_KEY (env) and the configured
 // model. Temperature 0: re-running a merge should stage the same diff, so
 // review conclusions survive a re-run (best-effort — Anthropic has no seed).
-func NewLLMMerger(model string) (*LLMMerger, error) {
+func NewLLMMerger(model string) (*GenMerger, error) {
 	p, err := anthropic.New("", model, anthropic.WithMaxTokens(16384), anthropic.WithTemperature(0))
 	if err != nil {
 		return nil, fmt.Errorf("importer: creating merge provider: %w", err)
 	}
-	return &LLMMerger{provider: p, model: model}, nil
+	return &GenMerger{gen: &anthropicGen{provider: p, model: model}}, nil
 }
-
-// ModelName reports the configured model for provenance frontmatter.
-func (m *LLMMerger) ModelName() string { return m.model }
 
 const mergeSystem = `You reconcile N drifted copies of the same Claude Code %s definition ("%s") into one canonical version.
 
@@ -62,13 +75,13 @@ type clusterMergeOut struct {
 }
 
 // MergeCluster reconciles one diverged cluster.
-func (m *LLMMerger) MergeCluster(ctx context.Context, in ClusterInput) (ClusterMerge, error) {
+func (m *GenMerger) MergeCluster(ctx context.Context, in ClusterInput) (ClusterMerge, error) {
 	var b strings.Builder
 	for _, c := range in.Copies {
 		fmt.Fprintf(&b, "### copy from repo %q\n\n%s\n\n", c.Repo, c.Body)
 	}
 	var out clusterMergeOut
-	usage, err := m.generate(ctx, fmt.Sprintf(mergeSystem, in.Kind, in.Name), b.String(), "cluster_merge", clusterMergeSchema(), &out)
+	usage, err := m.gen.generate(ctx, fmt.Sprintf(mergeSystem, in.Kind, in.Name), b.String(), "cluster_merge", clusterMergeSchema(), &out)
 	if err != nil {
 		return ClusterMerge{}, err
 	}
@@ -114,9 +127,9 @@ type decomposeOut struct {
 }
 
 // DecomposeClaudeMD splits one CLAUDE.md into cards + residual.
-func (m *LLMMerger) DecomposeClaudeMD(ctx context.Context, in ClaudeMDInput) (Decomposition, error) {
+func (m *GenMerger) DecomposeClaudeMD(ctx context.Context, in ClaudeMDInput) (Decomposition, error) {
 	var out decomposeOut
-	usage, err := m.generate(ctx, fmt.Sprintf(decomposeSystem, in.Repo, in.Repo), in.Content, "claudemd_decomposition", decomposeSchema(), &out)
+	usage, err := m.gen.generate(ctx, fmt.Sprintf(decomposeSystem, in.Repo, in.Repo), in.Content, "claudemd_decomposition", decomposeSchema(), &out)
 	if err != nil {
 		return Decomposition{}, err
 	}
@@ -133,9 +146,12 @@ func (m *LLMMerger) DecomposeClaudeMD(ctx context.Context, in ClaudeMDInput) (De
 	return res, nil
 }
 
+// ModelName reports the configured model.
+func (g *anthropicGen) ModelName() string { return g.model }
+
 // generate runs one structured-output call and decodes into out.
-func (m *LLMMerger) generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error) {
-	result, err := agent.GenerateJSONInto(ctx, m.provider, agent.GenerateJSONRequest{
+func (g *anthropicGen) generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error) {
+	result, err := agent.GenerateJSONInto(ctx, g.provider, agent.GenerateJSONRequest{
 		Messages: []history.Message{
 			{Role: "system", Content: system},
 			{Role: "user", Content: user},
