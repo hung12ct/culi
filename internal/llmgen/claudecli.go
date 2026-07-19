@@ -1,4 +1,4 @@
-package importer
+package llmgen
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// cliGen runs merges through `claude -p` (headless Claude Code) — zero API
+// cliGen runs calls through `claude -p` (headless Claude Code) — zero API
 // key, billed to the user's existing subscription. Every culi user has the
 // claude binary by definition. Weaker than the API backend in exactly one
 // way: no server-side schema enforcement, so output is decoded leniently and
@@ -19,17 +19,17 @@ type cliGen struct {
 	model string
 }
 
-// NewCLIMerger builds a merger on the claude CLI found in PATH.
-func NewCLIMerger(model string) (*GenMerger, error) {
+// NewCLI builds a generator on the claude CLI found in PATH.
+func NewCLI(model string) (Generator, error) {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
-		return nil, fmt.Errorf("importer: claude CLI not found in PATH: %w", err)
+		return nil, fmt.Errorf("llmgen: claude CLI not found in PATH: %w", err)
 	}
-	return &GenMerger{gen: &cliGen{bin: bin, model: model}}, nil
+	return &cliGen{bin: bin, model: model}, nil
 }
 
-// ModelName tags provenance with the transport so a reviewed merge records
-// how it was produced.
+// ModelName tags the model with the transport so provenance records how the
+// output was produced.
 func (g *cliGen) ModelName() string { return g.model + " (claude-cli)" }
 
 // cliResult is the subset of `claude -p --output-format json` we consume.
@@ -44,7 +44,7 @@ type cliResult struct {
 	} `json:"usage"`
 }
 
-func (g *cliGen) generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error) {
+func (g *cliGen) Generate(ctx context.Context, system, user, name string, schema map[string]any, out any) (Usage, error) {
 	prompt := system + "\n\n" + user + schemaInstruction(schema)
 	var usage Usage
 	var lastErr error
@@ -53,7 +53,7 @@ func (g *cliGen) generate(ctx context.Context, system, user, name string, schema
 		usage.Prompt += res.Usage.InputTokens
 		usage.Completion += res.Usage.OutputTokens
 		if err != nil {
-			return usage, fmt.Errorf("importer: claude-cli call %s: %w", name, err)
+			return usage, fmt.Errorf("llmgen: claude-cli call %s: %w", name, err)
 		}
 		if err := decodeLooseJSON(res.Result, out); err != nil {
 			// One corrective round: feed the decode error back (plan §upstream
@@ -65,7 +65,7 @@ func (g *cliGen) generate(ctx context.Context, system, user, name string, schema
 		}
 		return usage, nil
 	}
-	return usage, fmt.Errorf("importer: claude-cli call %s: %w", name, lastErr)
+	return usage, fmt.Errorf("llmgen: claude-cli call %s: %w", name, lastErr)
 }
 
 // invoke runs one headless call, prompt on stdin.
@@ -86,15 +86,4 @@ func (g *cliGen) invoke(ctx context.Context, prompt string) (cliResult, error) {
 		return res, fmt.Errorf("claude -p reported an error: %s", firstLineOf(res.Result))
 	}
 	return res, nil
-}
-
-func firstLineOf(s string) string {
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	if len(s) > 200 {
-		s = s[:200]
-	}
-	return s
 }

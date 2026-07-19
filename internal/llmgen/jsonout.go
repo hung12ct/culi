@@ -1,4 +1,4 @@
-package importer
+package llmgen
 
 import (
 	"encoding/json"
@@ -28,7 +28,7 @@ func decodeLooseJSON(raw string, out any) error {
 		}
 	}
 	if err := json.Unmarshal([]byte(s), out); err != nil {
-		return fmt.Errorf("importer: decoding model JSON: %w", err)
+		return fmt.Errorf("llmgen: decoding model JSON: %w", err)
 	}
 	return nil
 }
