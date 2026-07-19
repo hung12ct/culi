@@ -126,6 +126,47 @@ func TestSessionStartInjectsBaseline(t *testing.T) {
 	if !strings.Contains(ctxText, "Wrap Go errors") || !strings.Contains(ctxText, "<ctx>") {
 		t.Errorf("baseline content missing: %q", ctxText)
 	}
+	// The one-time pointer explainer rides with the baseline (plan §6).
+	if !strings.Contains(ctxText, "expand_card") {
+		t.Errorf("pointer header missing from baseline: %q", ctxText)
+	}
+}
+
+func TestSessionStartCoverageNotes(t *testing.T) {
+	// Empty store: the model must be told the silence is emptiness, not
+	// absence of culi (coverage honesty).
+	base := t.TempDir()
+	t.Setenv("CULI_HOME", base)
+	t.Setenv("CULI_NO_LEARN_SPAWN", "1")
+	if err := os.MkdirAll(filepath.Join(base, "knowledge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := index(t, "sess-cov")
+	if !strings.Contains(out, "knowledge store is empty") {
+		t.Errorf("empty-store note missing: %q", out)
+	}
+
+	// Cards exist but none for the detected repo and none baseline-flagged:
+	// name the gap. The cwd must look like a git repo for scope detection.
+	writeCard(t, base, "rules/other-repo.md", `---
+title: Other repo rule
+scope: [repo:elsewhere]
+summary: Only applies elsewhere.
+---
+Body.
+`)
+	repoDir := filepath.Join(base, "fakerepo")
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(Input{SessionID: "sess-cov2", CWD: repoDir, Source: "startup"})
+	out, code := runHook(t, "session-start", string(raw))
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(out, "no cards scoped to repo:fakerepo") {
+		t.Errorf("repo-coverage note missing: %q", out)
+	}
 }
 
 func TestPromptInjectionAndDedup(t *testing.T) {

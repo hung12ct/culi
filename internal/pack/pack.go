@@ -133,14 +133,30 @@ func render(c store.StoredCard, gran string, bodies map[int64]string) (string, i
 	}
 }
 
+// PointerHeader is the one-time SessionStart preface that teaches the model
+// what ▸ pointer lines are and how to pull them (plan §6). Without it a
+// fresh session sees bare pointers with no in-band instruction and tends to
+// ignore them. Its token cost is charged against the baseline budget by the
+// caller.
+const PointerHeader = `culi context cards follow. Lines starting with ▸ are collapsed cards ("▸ <id> <title>: <gist>") — expand one with the culi MCP tool expand_card(<id>); search more with search_context.`
+
 // Render produces the final envelope string ("" when nothing packed).
-func (inj Injection) Render() string {
+func (inj Injection) Render() string { return inj.RenderWith("") }
+
+// RenderWith prefaces the envelope with a non-card header line (e.g.
+// PointerHeader). Header text is never recorded in the injection log — it is
+// instruction, not knowledge, so 14.43's dedup does not apply.
+func (inj Injection) RenderWith(header string) string {
 	if len(inj.Items) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString(envOpen)
 	b.WriteByte('\n')
+	if header != "" {
+		b.WriteString(header)
+		b.WriteByte('\n')
+	}
 	for _, it := range inj.Items {
 		b.WriteString(it.Text)
 		b.WriteByte('\n')
