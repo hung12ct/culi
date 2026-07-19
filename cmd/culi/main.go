@@ -28,6 +28,7 @@ Usage:
   culi learn [--from-start]     mine queued session transcripts into candidate cards
   culi review [--list]          approve/reject mined candidate cards
   culi gen [--repo X] [--branch Y]  git history → CLAUDE.md sections + repo cards
+  culi stats                    token accounting, gate economics, learning spend
 `
 
 func main() {
@@ -61,6 +62,8 @@ func main() {
 		exit(cli.Review(os.Args[2:]))
 	case "gen":
 		exit(cli.Gen(os.Args[2:]))
+	case "stats":
+		exit(cli.Stats(os.Args[2:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:

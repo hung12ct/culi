@@ -1,0 +1,64 @@
+package store
+
+import (
+	"context"
+	"testing"
+	"time"
+)
+
+func TestInjectionAggsAndSessionCount(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	recs := []InjectionRecord{
+		{CardID: "a", Granularity: GranBody, Tokens: 100},
+		{CardID: "b", Granularity: GranHook, Tokens: 15},
+	}
+	if err := s.RecordInjections(ctx, "s1", "user-prompt-submit", "h1", recs); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordInjections(ctx, "s2", "session-start", "", recs[:1]); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.SessionCount(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("sessions = %d, err %v", n, err)
+	}
+	aggs, err := s.InjectionAggs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total, tokens := 0, 0
+	for _, a := range aggs {
+		total += a.Count
+		tokens += a.Tokens
+	}
+	if total != 3 || tokens != 215 {
+		t.Errorf("aggs = %+v", aggs)
+	}
+}
+
+func TestAllCardStatsDecays(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if err := s.AddFeedback(ctx, "cardx", FeedbackExpanded, 2); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	stats, err := s.AllCardStats(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := stats["cardx"]; st.Expanded < 1.99 || st.Expanded > 2.01 {
+		t.Errorf("fresh expanded = %f", st.Expanded)
+	}
+	// Two half-lives later: quartered.
+	later := now.Add(2 * utilityHalfLife)
+	stats, err = s.AllCardStats(ctx, later)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := stats["cardx"]; st.Expanded < 0.45 || st.Expanded > 0.55 {
+		t.Errorf("decayed expanded = %f", st.Expanded)
+	}
+}
