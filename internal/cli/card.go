@@ -9,6 +9,7 @@ import (
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/indexer"
+	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/store"
 )
 
@@ -89,5 +90,8 @@ func cardRm(ctx context.Context, s *store.Store, base, id string) error {
 		return err
 	}
 	fmt.Printf("removed %s (%s)\n", c.ID, c.Path)
+	// Governance trail, best-effort — removal is exactly the change git
+	// history exists to make revertible.
+	_ = knowledge.Commit(config.KnowledgeDir(base), "card: removed "+c.ID)
 	return nil
 }

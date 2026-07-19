@@ -11,11 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/indexer"
+	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/learn/llmtier"
 	"github.com/hung12ct/culi/internal/learn/mine"
 	"github.com/hung12ct/culi/internal/learn/patterns"
@@ -195,7 +197,41 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		_, _ = indexer.EmbedMissing(ectx, s, e, cfg.Ollama.Model)
 		cancel()
 	}
+	// Governance trail: one aggregate commit per worker run (best-effort —
+	// history must never fail learning). A concurrent review/save_lesson
+	// commit may sweep this run's files under its own message; the change is
+	// still recorded, just labeled by the other actor — tolerated by design,
+	// do not add locking for it.
+	if msg := commitMessage(sum); msg != "" {
+		if err := knowledge.Commit(config.KnowledgeDir(base), msg); err != nil && logf != nil {
+			logf("learn: knowledge commit: %v", err)
+		}
+	}
 	return sum, nil
+}
+
+// commitMessage summarizes one run's knowledge changes; "" when nothing
+// changed on disk.
+func commitMessage(sum Summary) string {
+	var parts []string
+	add := func(n int, label string) {
+		if n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, label))
+		}
+	}
+	add(len(sum.Created), "mined candidates")
+	add(len(sum.Reinforced), "reinforced")
+	add(len(sum.Confirmed), "confirmed")
+	add(len(sum.Retired), "retired")
+	add(len(sum.Style.Created), "style candidates")
+	add(len(sum.Style.Confirmed), "style confirmed")
+	add(len(sum.Style.Retired), "style retired")
+	add(len(sum.Patterns.Created), "patterns")
+	add(len(sum.Patterns.Retired), "patterns retired")
+	if len(parts) == 0 {
+		return ""
+	}
+	return "learn: " + strings.Join(parts, ", ")
 }
 
 // firstNoteLine compresses an error chain into one note line.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/indexer"
+	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/learn/gitfacts"
 	"github.com/hung12ct/culi/internal/learn/llmtier"
 	"github.com/hung12ct/culi/internal/llmgen"
@@ -71,6 +72,12 @@ func (g *Generator) Generate(ctx context.Context, facts gitfacts.Facts, branch s
 	}
 	if _, err := indexer.Sync(ctx, g.Store, config.KnowledgeDir(g.Base)); err != nil {
 		return res, fmt.Errorf("branchgen: %w", err)
+	}
+	if len(res.CardsWritten) > 0 {
+		msg := fmt.Sprintf("gen: %s: %d cards from git facts %s", facts.Repo, len(res.CardsWritten), hash)
+		if err := knowledge.Commit(config.KnowledgeDir(g.Base), msg); err != nil {
+			g.logf("gen: knowledge commit: %v", err) // best-effort
+		}
 	}
 
 	st[key] = hash
