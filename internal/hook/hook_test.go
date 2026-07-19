@@ -10,10 +10,14 @@ import (
 )
 
 // sandbox points CULI_HOME at a temp dir and seeds a small knowledge store.
+// The learn-worker spawn is disabled: under `go test`, os.Executable is the
+// test binary, and re-executing it would fork this whole suite as a rogue
+// concurrent child (the exact flake CI caught).
 func sandbox(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()
 	t.Setenv("CULI_HOME", base)
+	t.Setenv("CULI_NO_LEARN_SPAWN", "1")
 	writeCard(t, base, "rules/go-errors.md", `---
 title: Wrap Go errors
 scope: [global]
