@@ -138,3 +138,45 @@ func TestPackCaps(t *testing.T) {
 		t.Errorf("hook-line cap exceeded: %d", hooks)
 	}
 }
+
+func TestMMRDemotesNearDuplicates(t *testing.T) {
+	v1 := []float32{1, 0}
+	v2 := []float32{0, 1}
+	a := cand(1, "rules/a", "A", "sum a", 0, false)
+	a.Score, a.Vec = 0.030, v1
+	dup := cand(2, "rules/a-dup", "A dup", "sum a again", 0, false)
+	dup.Score, dup.Vec = 0.029, v1
+	c := cand(3, "rules/c", "C", "sum c", 0, false)
+	c.Score, c.Vec = 0.020, v2
+	cands := []retrieve.Candidate{a, dup, c}
+	inj, err := Pack(cands, nil, 700, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inj.Items) != 3 {
+		t.Fatalf("packed %d items, want 3", len(inj.Items))
+	}
+	got := []string{inj.Items[0].CardID, inj.Items[1].CardID, inj.Items[2].CardID}
+	want := []string{"rules/a", "rules/c", "rules/a-dup"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("MMR order = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestMMRKeepsPinsFirst(t *testing.T) {
+	v1 := []float32{1, 0}
+	pin := cand(1, "rules/pin", "Pinned", "sum", 0, true)
+	pin.Score, pin.Vec = 0.001, v1
+	top := cand(2, "rules/top", "Top", "sum", 0, false)
+	top.Score, top.Vec = 0.050, v1
+	cands := []retrieve.Candidate{pin, top}
+	inj, err := Pack(cands, nil, 700, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inj.Items) < 2 || inj.Items[0].CardID != "rules/pin" {
+		t.Fatalf("pin lost its slot: %+v", inj.Items)
+	}
+}
