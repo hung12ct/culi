@@ -57,9 +57,12 @@ type ExportMeta struct {
 
 // Provenance records the origin of imported or learned content.
 type Provenance struct {
-	Source     string   `yaml:"source,omitempty"`      // import | learn | manual
+	Source     string   `yaml:"source,omitempty"`      // import | learn | mcp | gen | manual
 	MergedFrom []string `yaml:"merged_from,omitempty"` // contributing repo names
 	Model      string   `yaml:"model,omitempty"`       // LLM used, if any
+	// SourceHash fingerprints the deterministic input a generated card
+	// derives from (gitfacts hash) — unchanged input ⇒ regen skips the card.
+	SourceHash string `yaml:"source_hash,omitempty"`
 }
 
 // Triggers pin a card to the top of the ranked list when matched (max 2 pins
