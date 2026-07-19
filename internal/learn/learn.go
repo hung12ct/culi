@@ -19,6 +19,7 @@ import (
 	"github.com/hung12ct/culi/internal/learn/llmtier"
 	"github.com/hung12ct/culi/internal/learn/mine"
 	"github.com/hung12ct/culi/internal/learn/queue"
+	"github.com/hung12ct/culi/internal/learn/style"
 	"github.com/hung12ct/culi/internal/llmgen"
 	"github.com/hung12ct/culi/internal/store"
 )
@@ -38,14 +39,22 @@ type Summary struct {
 	Confirmed  []string
 	Retired    []string
 	StyleObs   int
+	Style      style.Result // pipeline B synthesis, when it fired
 	Usage      llmgen.Usage
 	Notes      []string
 	Capped     bool
 }
 
-// Run drains the inbox once. Errors that concern one job go to Notes and the
-// fail ladder; only setup failures return an error.
-func Run(ctx context.Context, base string, cfg config.Config, fromStart bool, logf func(string, ...any)) (Summary, error) {
+// Options tunes one worker run.
+type Options struct {
+	FromStart  bool // ignore cursors, re-mine transcripts from the beginning
+	ForceStyle bool // bypass the style-synthesis trigger policy
+}
+
+// Run drains the inbox once and fires the policy-gated style synthesis.
+// Errors that concern one job go to Notes and the fail ladder; only setup
+// failures return an error.
+func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf func(string, ...any)) (Summary, error) {
 	var sum Summary
 	if !cfg.Learn.Enabled {
 		sum.Notes = append(sum.Notes, "learning disabled (learn.enabled: false) — jobs stay queued")
@@ -67,9 +76,6 @@ func Run(ctx context.Context, base string, cfg config.Config, fromStart bool, lo
 		return sum, err
 	}
 	sum.Jobs = len(jobs)
-	if len(jobs) == 0 {
-		return sum, nil
-	}
 
 	tier, desc, err := llmtier.Resolve(cfg.Learn, cfg.Ollama.Endpoint, stateDir)
 	if err != nil {
@@ -96,6 +102,7 @@ func Run(ctx context.Context, base string, cfg config.Config, fromStart bool, lo
 	}
 	cursors := queue.LoadCursors(stateDir)
 	now := time.Now().UTC()
+	fromStart := opts.FromStart
 
 	for _, job := range jobs {
 		st, err := os.Stat(job.TranscriptPath)
@@ -155,8 +162,21 @@ func Run(ctx context.Context, base string, cfg config.Config, fromStart bool, lo
 		sum.Notes = append(sum.Notes, res.Notes...)
 	}
 
+	// Pipeline B: policy-gated style synthesis over the observations ledger.
+	// Skipped when the mining loop already hit the caps; its own call passes
+	// the same ledger either way.
+	if !sum.Capped {
+		synth := &style.Synthesizer{Base: base, Store: s, Tier: tier}
+		sres, err := synth.Run(ctx, opts.ForceStyle, time.Now().UTC())
+		sum.Style = sres
+		sum.Usage.Add(sres.Usage)
+		if err != nil && !errors.Is(err, llmtier.ErrCapped) {
+			sum.Notes = append(sum.Notes, "style synthesis: "+firstNoteLine(err))
+		}
+	}
+
 	// Vectors for anything new, so next run's dedup can use the embed arm.
-	if len(sum.Created) > 0 || len(sum.Reinforced) > 0 {
+	if len(sum.Created)+len(sum.Style.Created) > 0 || len(sum.Reinforced) > 0 {
 		ectx, cancel := context.WithTimeout(ctx, embedBudget)
 		_, _ = indexer.EmbedMissing(ectx, s, e, cfg.Ollama.Model)
 		cancel()

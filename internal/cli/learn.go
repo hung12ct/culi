@@ -24,6 +24,7 @@ const learnTimeout = 15 * time.Minute
 func Learn(args []string) error {
 	fs := flag.NewFlagSet("learn", flag.ContinueOnError)
 	fromStart := fs.Bool("from-start", false, "ignore cursors and re-mine transcripts from the beginning")
+	forceStyle := fs.Bool("style", false, "force style synthesis now (bypass the weekly/15-observation trigger)")
 	auto := fs.Bool("auto", false, "background mode: log to ~/.culi/logs/learn.log (used by the session-end hook)")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
@@ -40,7 +41,7 @@ func Learn(args []string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), learnTimeout)
 	defer cancel()
-	sum, err := learn.Run(ctx, base, cfg, *fromStart, logf)
+	sum, err := learn.Run(ctx, base, cfg, learn.Options{FromStart: *fromStart, ForceStyle: *forceStyle}, logf)
 	if err != nil {
 		if *auto {
 			logf("learn: %v", err)
@@ -67,6 +68,25 @@ func Learn(args []string) error {
 	}
 	if sum.StyleObs > 0 {
 		logf("style observations: +%d (synthesized periodically)", sum.StyleObs)
+	}
+	if sum.Style.Ran {
+		logf("style synthesis: %d group(s)", sum.Style.Groups)
+		for _, id := range sum.Style.Created {
+			logf("style candidate  %s", id)
+		}
+		for _, id := range sum.Style.Reinforced {
+			logf("style reinforced %s", id)
+		}
+		for _, id := range sum.Style.Confirmed {
+			logf("style confirmed  %s", id)
+		}
+		for _, id := range sum.Style.Retired {
+			logf("style retired    %s (contradicted)", id)
+		}
+		for _, n := range sum.Style.Skipped {
+			logf("style skipped    %s", n)
+		}
+		sum.Notes = append(sum.Notes, sum.Style.Notes...)
 	}
 	for _, n := range sum.Notes {
 		logf("note: %s", n)

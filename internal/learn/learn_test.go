@@ -72,7 +72,7 @@ func TestRunEndToEndOverStubCLI(t *testing.T) {
 	cfg.Learn.Provider = "claude-cli"
 	cfg.Ollama.Endpoint = "http://127.0.0.1:1" // dead: dedup falls back to lexical
 
-	sum, err := Run(context.Background(), base, cfg, false, t.Logf)
+	sum, err := Run(context.Background(), base, cfg, Options{}, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestRunEndToEndOverStubCLI(t *testing.T) {
 		t.Errorf("card missing: %v", err)
 	}
 	// Re-run: nothing new → job-less no-op.
-	sum2, err := Run(context.Background(), base, cfg, false, t.Logf)
+	sum2, err := Run(context.Background(), base, cfg, Options{}, t.Logf)
 	if err != nil || sum2.Jobs != 0 {
 		t.Errorf("second run = %+v, %v", sum2, err)
 	}
@@ -101,7 +101,7 @@ func TestRunEndToEndOverStubCLI(t *testing.T) {
 func TestRunDisabledKeepsQueue(t *testing.T) {
 	base, cfg := setupBase(t)
 	cfg.Learn.Enabled = false
-	sum, err := Run(context.Background(), base, cfg, false, t.Logf)
+	sum, err := Run(context.Background(), base, cfg, Options{}, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestRunNoBackendKeepsQueue(t *testing.T) {
 	base, cfg := setupBase(t)
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("PATH", t.TempDir()) // no claude
-	sum, err := Run(context.Background(), base, cfg, false, t.Logf)
+	sum, err := Run(context.Background(), base, cfg, Options{}, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestRunFailLadderOnGarbageBackend(t *testing.T) {
 	stubClaude(t, "utter garbage, no json")
 	cfg.Learn.Provider = "claude-cli"
 
-	sum, err := Run(context.Background(), base, cfg, false, t.Logf)
+	sum, err := Run(context.Background(), base, cfg, Options{}, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
