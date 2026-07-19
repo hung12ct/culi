@@ -136,6 +136,13 @@ func terms(s string, max int) []string {
 	return out
 }
 
+// Fold, Terms and Jaccard export the text-normalization primitives for
+// non-hot-path consumers (the learning pipelines) so Go-side matching agrees
+// everywhere. The hot path keeps calling the unexported forms directly.
+func Fold(s string) string             { return fold(s) }
+func Terms(s string, max int) []string { return terms(s, max) }
+func Jaccard(a, b []string) float64    { return jaccard(a, b) }
+
 // jaccard computes set overlap of two term slices.
 func jaccard(a, b []string) float64 {
 	if len(a) == 0 || len(b) == 0 {
