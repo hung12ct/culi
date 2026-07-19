@@ -44,6 +44,7 @@ type BodyLoader func(rowids []int64) (map[int64]string, error)
 // prior granularity levels (monotonic dedup: a card re-emits only at a
 // strictly higher level).
 func Pack(cands []retrieve.Candidate, injected map[string]int, budget int, load BodyLoader) (Injection, error) {
+	cands = mmrOrder(cands) // near-duplicates cost one slot, not two
 	usable := budget * fillPercent / 100
 	spent := 0
 	hookLines := 0

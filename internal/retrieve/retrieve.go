@@ -1,7 +1,8 @@
 // Package retrieve implements the token-minimal retrieval funnel:
-// gate → scope filter + shadowing → trigger pinning → BM25 → fuse → floor.
-// Phase 1 is BM25-only; the embedding arm lands in Phase 3 and fuses into the
-// same rank-reciprocal scheme.
+// gate → scope filter + shadowing → trigger pinning →
+// (BM25 ‖ embed+cosine) → RRF fuse × utility → floor.
+// The embedding arm is optional at every level: nil Embedder, open breaker,
+// or a dead Ollama all collapse the fusion to BM25-only.
 package retrieve
 
 import (
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/store"
 )
 
@@ -24,16 +26,21 @@ const (
 	pinFallback   = 0.01 // bonus for trigger hits beyond the pin cap
 )
 
-// Candidate is one card that survived the funnel, best first.
+// Candidate is one card that survived the funnel, best first. Vec is the
+// card's embedding when the cosine arm ran (nil otherwise) — the packer uses
+// it for MMR dedup.
 type Candidate struct {
 	Card   store.StoredCard
 	Score  float64
 	Pinned bool
+	Vec    []float32
 }
 
-// Retriever runs the funnel against a store.
+// Retriever runs the funnel against a store. Embedder nil ⇒ BM25-only.
 type Retriever struct {
-	Store *store.Store
+	Store    *store.Store
+	Embedder embed.Embedder
+	Model    string // embedding model tag; vectors from other models are stale
 }
 
 // Retrieve returns ranked candidates for a gated query. May return an empty
@@ -41,6 +48,10 @@ type Retriever struct {
 func (r *Retriever) Retrieve(ctx context.Context, query string, sc Scope) ([]Candidate, error) {
 	queryTerms := terms(query, maxQueryTerms)
 	matchExpr := FTSExpr(query)
+
+	// Embedding arm runs concurrently with everything below (~1 HTTP call vs
+	// metadata scan + FTS query).
+	armCh := r.startEmbedArm(ctx, query)
 
 	// Load card metadata (no bodies — packer hydrates the few it needs).
 	metas, err := r.Store.AllCardsMeta(ctx)
@@ -79,6 +90,16 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, sc Scope) ([]Can
 		}
 	}
 
+	// Join the embedding arm and rank in-scope cards by cosine.
+	a := <-armCh
+	cosRank, cosSim := cosineRanks(a, inScope)
+
+	// Utility multipliers tune ordering from decayed feedback; missing = 1.0.
+	utils, err := r.Store.UtilityMultipliers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("retrieve: %w", err)
+	}
+
 	foldedQuery := fold(query)
 	var out []Candidate
 	for _, c := range inScope {
@@ -88,31 +109,54 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, sc Scope) ([]Can
 		}
 
 		pinned := matchesTrigger(c.Triggers.Keywords, foldedQuery)
+
+		// RRF: each arm contributes 1/(k+rank); rank-based, so BM25 and cosine
+		// never need scale normalization.
 		score := 0.0
-		if br, ok := bm25Rank[c.Rowid]; ok {
-			score = 1.0 / (rrfK + float64(br))
+		br, bm25Hit := bm25Rank[c.Rowid]
+		if bm25Hit {
+			score += 1.0 / (rrfK + float64(br))
+		}
+		if cr, ok := cosRank[c.Rowid]; ok {
+			score += 1.0 / (rrfK + float64(cr))
 		}
 		if score == 0 && !pinned {
 			continue
 		}
-		score += sc.Boost(rank)
 
-		// Score floor: without a pin, demand ≥2 matched terms (or all terms of
-		// a 1-term query) so single stray word overlaps inject nothing.
-		if !pinned && matchedTerms(c, queryTerms) < min(2, len(queryTerms)) {
+		// Score floor: a candidate needs a pin, a strong semantic match, or a
+		// lexical match of ≥2 terms (all terms of a 1-term query) — single
+		// stray word overlaps inject nothing.
+		lexicalPass := bm25Hit && matchedTerms(c, queryTerms) >= min(2, len(queryTerms))
+		if !pinned && cosSim[c.Rowid] < cosFloor && !lexicalPass {
 			continue
 		}
-		out = append(out, Candidate{Card: c, Score: score, Pinned: pinned})
+
+		if u, ok := utils[c.ID]; ok {
+			score *= u
+		}
+		score += sc.Boost(rank)
+		out = append(out, Candidate{Card: c, Score: score, Pinned: pinned, Vec: a.vecs[c.Rowid]})
 	}
 
-	// Cap pins by SCORE, not iteration order: sort first, then demote trigger
-	// hits beyond maxPins to a plain ranking bonus.
-	sort.SliceStable(out, func(i, j int) bool {
+	out = capPins(out)
+	if len(out) > maxCandidates {
+		out = out[:maxCandidates]
+	}
+	return out, nil
+}
+
+// capPins sorts candidates (pins first, then score) and demotes trigger hits
+// beyond maxPins to a plain ranking bonus — pins are capped by SCORE, not
+// iteration order.
+func capPins(out []Candidate) []Candidate {
+	byRank := func(i, j int) bool {
 		if out[i].Pinned != out[j].Pinned {
 			return out[i].Pinned
 		}
 		return out[i].Score > out[j].Score
-	})
+	}
+	sort.SliceStable(out, byRank)
 	pins := 0
 	demoted := false
 	for i := range out {
@@ -128,17 +172,9 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, sc Scope) ([]Can
 		demoted = true
 	}
 	if demoted {
-		sort.SliceStable(out, func(i, j int) bool {
-			if out[i].Pinned != out[j].Pinned {
-				return out[i].Pinned
-			}
-			return out[i].Score > out[j].Score
-		})
+		sort.SliceStable(out, byRank)
 	}
-	if len(out) > maxCandidates {
-		out = out[:maxCandidates]
-	}
-	return out, nil
+	return out
 }
 
 // Baseline returns SessionStart cards for a scope: baseline-flagged cards
