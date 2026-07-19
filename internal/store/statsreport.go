@@ -7,12 +7,13 @@ import (
 )
 
 // InjectionAgg is one (event, granularity) bucket of the injection history.
-// Only the retention window exists — PruneStale bounds it to ~7 days.
+// Only the retention window exists — PruneStale bounds it to ~7 days. JSON
+// tags serve `culi stats --json` (snake_case like the rest of that schema).
 type InjectionAgg struct {
-	Event       string
-	Granularity string
-	Count       int
-	Tokens      int
+	Event       string `json:"event"`
+	Granularity string `json:"granularity"`
+	Count       int    `json:"count"`
+	Tokens      int    `json:"tokens"`
 }
 
 // InjectionAggs aggregates the injection log for `culi stats`.
