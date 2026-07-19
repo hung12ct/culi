@@ -73,6 +73,15 @@ ollama:
 #   # (free, local - set merge_model to a local model like qwen3) or none.
 #   provider: auto
 #   merge_model: claude-sonnet-5
+# learn:
+#   # background transcript mining (lessons/rules/style). Same backend
+#   # options as import.provider; both daily caps must pass for a call.
+#   enabled: true
+#   provider: auto
+#   cheap_model: claude-haiku-4-5
+#   strong_model: claude-sonnet-5
+#   daily_usd_cap: 0.50    # anthropic API only; claude-cli/ollama cost $0
+#   daily_call_cap: 40     # all backends - the subscription-quota guard
 `
 		if err := os.WriteFile(cfgPath, []byte(defaultCfg), 0o644); err != nil {
 			return fmt.Errorf("cli: writing config.yaml: %w", err)

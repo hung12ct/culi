@@ -26,6 +26,13 @@ type Card struct {
 	Baseline bool     // part of the SessionStart baseline for its scope
 	Status   string   // ""/confirmed | candidate | retired (learning lifecycle)
 
+	// Learning lifecycle (Phase 4): a mined card starts as a candidate with
+	// Observations 1 and confirms at 2 (re-learning reinforces instead of
+	// duplicating). Supersedes names the card ID this one replaces; the old
+	// card is retired when this one confirms.
+	Observations int
+	Supersedes   string
+
 	ContentHash string // sha256 of raw file content
 	TokSummary  int    // estimated tokens, computed at parse time
 	TokBody     int

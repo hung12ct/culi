@@ -15,18 +15,20 @@ import (
 // never for rewriting hand-edited files.
 func Render(c Card) ([]byte, error) {
 	fm := frontmatter{
-		ID:         c.ID,
-		Type:       c.Type,
-		Title:      c.Title,
-		Summary:    c.Summary,
-		Scope:      c.Scopes,
-		Key:        c.Key,
-		Triggers:   c.Triggers,
-		Aliases:    c.Aliases,
-		Baseline:   c.Baseline,
-		Status:     c.Status,
-		Export:     c.Export,
-		Provenance: c.Provenance,
+		ID:           c.ID,
+		Type:         c.Type,
+		Title:        c.Title,
+		Summary:      c.Summary,
+		Scope:        c.Scopes,
+		Key:          c.Key,
+		Triggers:     c.Triggers,
+		Aliases:      c.Aliases,
+		Baseline:     c.Baseline,
+		Status:       c.Status,
+		Observations: c.Observations,
+		Supersedes:   c.Supersedes,
+		Export:       c.Export,
+		Provenance:   c.Provenance,
 	}
 	if fm.ID == defaultID(c.Path) {
 		fm.ID = "" // derivable — keep frontmatter minimal
