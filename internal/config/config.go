@@ -31,6 +31,29 @@ type Config struct {
 	Repos []string `yaml:"repos"`
 	// Import configures the drift-reconcile pipeline.
 	Import ImportConfig `yaml:"import"`
+	// Learn configures the background learning pipelines.
+	Learn LearnConfig `yaml:"learn"`
+}
+
+// LearnConfig tunes transcript mining (Phase 4). Both caps must pass for a
+// model call to run; hooks always enqueue regardless (the queue drains when
+// caps reset). To spend nothing, set enabled: false or provider: none.
+type LearnConfig struct {
+	// Enabled is the master switch (default true).
+	Enabled bool `yaml:"enabled"`
+	// Provider selects the mining backend like import.provider: auto (default),
+	// anthropic, claude-cli, ollama, or none.
+	Provider string `yaml:"provider"`
+	// CheapModel handles routine mining; StrongModel is the one-step
+	// escalation on schema failures. For ollama both MUST be local models.
+	CheapModel  string `yaml:"cheap_model"`
+	StrongModel string `yaml:"strong_model"`
+	// DailyUSDCap bounds estimated API spend per day (anthropic backend only;
+	// claude-cli and ollama cost $0). 0 = default.
+	DailyUSDCap float64 `yaml:"daily_usd_cap"`
+	// DailyCallCap bounds model calls per day on every backend — the
+	// subscription-quota guard for claude-cli. 0 = default.
+	DailyCallCap int `yaml:"daily_call_cap"`
 }
 
 // ImportConfig tunes `culi import merge`.
@@ -59,6 +82,10 @@ const (
 	defaultOllamaEndpoint = "http://localhost:11434"
 	defaultOllamaModel    = "nomic-embed-text"
 	defaultMergeModel     = "claude-sonnet-5"
+	defaultCheapModel     = "claude-haiku-4-5"
+	defaultStrongModel    = "claude-sonnet-5"
+	defaultDailyUSDCap    = 0.50
+	defaultDailyCallCap   = 40
 )
 
 // BaseDir returns the culi home directory: $CULI_HOME if set, else ~/.culi.
@@ -96,6 +123,11 @@ func Load(base string) (Config, error) {
 		BaselineBudget: defaultBaselineBudget,
 		Ollama:         OllamaConfig{Endpoint: defaultOllamaEndpoint, Model: defaultOllamaModel},
 		Import:         ImportConfig{Provider: "auto", MergeModel: defaultMergeModel},
+		Learn: LearnConfig{
+			Enabled: true, Provider: "auto",
+			CheapModel: defaultCheapModel, StrongModel: defaultStrongModel,
+			DailyUSDCap: defaultDailyUSDCap, DailyCallCap: defaultDailyCallCap,
+		},
 	}
 	raw, err := os.ReadFile(filepath.Join(base, "config.yaml"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -124,6 +156,21 @@ func Load(base string) (Config, error) {
 	}
 	if cfg.Import.MergeModel == "" {
 		cfg.Import.MergeModel = defaultMergeModel
+	}
+	if cfg.Learn.Provider == "" {
+		cfg.Learn.Provider = "auto"
+	}
+	if cfg.Learn.CheapModel == "" {
+		cfg.Learn.CheapModel = defaultCheapModel
+	}
+	if cfg.Learn.StrongModel == "" {
+		cfg.Learn.StrongModel = defaultStrongModel
+	}
+	if cfg.Learn.DailyUSDCap <= 0 {
+		cfg.Learn.DailyUSDCap = defaultDailyUSDCap
+	}
+	if cfg.Learn.DailyCallCap <= 0 {
+		cfg.Learn.DailyCallCap = defaultDailyCallCap
 	}
 	return cfg, nil
 }
