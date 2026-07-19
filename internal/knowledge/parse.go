@@ -13,18 +13,20 @@ import (
 // compatibility); missing optional fields default. Only Title is required —
 // everything else degrades.
 type frontmatter struct {
-	ID         string      `yaml:"id,omitempty"`
-	Type       string      `yaml:"type,omitempty"`
-	Title      string      `yaml:"title,omitempty"`
-	Summary    string      `yaml:"summary,omitempty"`
-	Scope      []string    `yaml:"scope,omitempty"`
-	Key        string      `yaml:"key,omitempty"`
-	Triggers   Triggers    `yaml:"triggers,omitempty"`
-	Aliases    []string    `yaml:"aliases,omitempty"`
-	Baseline   bool        `yaml:"baseline,omitempty"`
-	Status     string      `yaml:"status,omitempty"`
-	Export     *ExportMeta `yaml:"export,omitempty"`
-	Provenance *Provenance `yaml:"provenance,omitempty"`
+	ID           string      `yaml:"id,omitempty"`
+	Type         string      `yaml:"type,omitempty"`
+	Title        string      `yaml:"title,omitempty"`
+	Summary      string      `yaml:"summary,omitempty"`
+	Scope        []string    `yaml:"scope,omitempty"`
+	Key          string      `yaml:"key,omitempty"`
+	Triggers     Triggers    `yaml:"triggers,omitempty"`
+	Aliases      []string    `yaml:"aliases,omitempty"`
+	Baseline     bool        `yaml:"baseline,omitempty"`
+	Status       string      `yaml:"status,omitempty"`
+	Observations int         `yaml:"observations,omitempty"`
+	Supersedes   string      `yaml:"supersedes,omitempty"`
+	Export       *ExportMeta `yaml:"export,omitempty"`
+	Provenance   *Provenance `yaml:"provenance,omitempty"`
 }
 
 var fmDelim = []byte("---")
@@ -45,21 +47,23 @@ func Parse(relPath string, raw []byte) (Card, error) {
 	}
 
 	c := Card{
-		ID:          meta.ID,
-		Path:        relPath,
-		Type:        meta.Type,
-		Title:       strings.TrimSpace(meta.Title),
-		Summary:     strings.TrimSpace(meta.Summary),
-		Body:        strings.TrimSpace(string(body)),
-		Scopes:      meta.Scope,
-		Key:         meta.Key,
-		Triggers:    meta.Triggers,
-		Aliases:     meta.Aliases,
-		Baseline:    meta.Baseline,
-		Status:      meta.Status,
-		ContentHash: hashContent(raw),
-		Export:      meta.Export,
-		Provenance:  meta.Provenance,
+		ID:           meta.ID,
+		Path:         relPath,
+		Type:         meta.Type,
+		Title:        strings.TrimSpace(meta.Title),
+		Summary:      strings.TrimSpace(meta.Summary),
+		Body:         strings.TrimSpace(string(body)),
+		Scopes:       meta.Scope,
+		Key:          meta.Key,
+		Triggers:     meta.Triggers,
+		Aliases:      meta.Aliases,
+		Baseline:     meta.Baseline,
+		Status:       meta.Status,
+		Observations: meta.Observations,
+		Supersedes:   meta.Supersedes,
+		ContentHash:  hashContent(raw),
+		Export:       meta.Export,
+		Provenance:   meta.Provenance,
 	}
 	if c.ID == "" {
 		c.ID = defaultID(relPath)

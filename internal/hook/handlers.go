@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 
@@ -190,7 +191,27 @@ func handleSessionEnd(ctx context.Context, base string, in Input) error {
 	if err := os.WriteFile(name, raw, 0o644); err != nil {
 		return fmt.Errorf("hook: writing job: %w", err)
 	}
+	spawnLearnWorker(base)
 	return nil
+}
+
+// spawnLearnWorker starts `culi learn --auto` detached: mining never runs in
+// a hook (plan §learning A) and the worker self-limits (lockfile, throttle,
+// spend caps). Best-effort — a spawn failure only delays learning until the
+// next session end.
+func spawnLearnWorker(base string) {
+	exe, err := os.Executable()
+	if err != nil {
+		logf(base, "session-end: resolving executable: %v", err)
+		return
+	}
+	cmd := exec.Command(exe, "learn", "--auto")
+	detach(cmd) // own session: survives the hook's process group teardown
+	if err := cmd.Start(); err != nil {
+		logf(base, "session-end: spawning learn worker: %v", err)
+		return
+	}
+	_ = cmd.Process.Release()
 }
 
 func bodyLoader(ctx context.Context, s *store.Store) pack.BodyLoader {
