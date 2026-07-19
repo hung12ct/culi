@@ -14,6 +14,7 @@ import (
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/indexer"
+	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/pack"
 	"github.com/hung12ct/culi/internal/retrieve"
 	"github.com/hung12ct/culi/internal/store"
@@ -139,23 +140,52 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 		return "", err
 	}
 	if len(cands) == 0 {
-		return "", nil
+		return coverageNote(ctx, s, sc), nil
 	}
 	injected, err := s.InjectedLevels(ctx, in.SessionID)
 	if err != nil {
 		return "", err
 	}
-	inj, err := pack.Pack(cands, injected, cfg.BaselineBudget, bodyLoader(ctx, s))
+	// The pointer header rides inside the same budget (C3): what the header
+	// costs, the cards cannot spend.
+	headerTok := knowledge.EstimateTokens(pack.PointerHeader)
+	inj, err := pack.Pack(cands, injected, cfg.BaselineBudget-headerTok, bodyLoader(ctx, s))
 	if err != nil {
 		return "", err
 	}
 	if len(inj.Items) == 0 {
-		return "", nil
+		return coverageNote(ctx, s, sc), nil
 	}
 	if err := s.RecordInjections(ctx, in.SessionID, "session-start", "", inj.Records()); err != nil {
 		return "", err
 	}
-	return inj.Render(), nil
+	return inj.RenderWith(pack.PointerHeader), nil
+}
+
+// coverageNote implements the coverage-honesty amendment (plan §ecosystem 6):
+// an empty baseline must be distinguishable from a missing or unaware store,
+// or the model over-trusts the silence. One line, session-start only — never
+// per-prompt noise. Best-effort: any store error degrades to silence.
+func coverageNote(ctx context.Context, s *store.Store, sc retrieve.Scope) string {
+	metas, err := s.AllCardsMeta(ctx)
+	if err != nil {
+		return ""
+	}
+	if len(metas) == 0 {
+		return "<ctx>\nculi: knowledge store is empty — add cards to ~/.culi/knowledge, or run `culi import` / `culi gen`.\n</ctx>"
+	}
+	if sc.Repo == "" {
+		return ""
+	}
+	for _, c := range metas {
+		for _, scope := range c.Scopes {
+			if scope == "repo:"+sc.Repo {
+				return ""
+			}
+		}
+	}
+	return "<ctx>\nculi: no cards scoped to repo:" + sc.Repo +
+		" yet — global cards still apply per prompt; `culi gen --repo` can seed repo knowledge.\n</ctx>"
 }
 
 // handleSessionEnd folds utility feedback (pointers injected but never
