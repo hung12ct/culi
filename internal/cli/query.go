@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/pack"
 	"github.com/hung12ct/culi/internal/retrieve"
 	"github.com/hung12ct/culi/internal/store"
@@ -65,7 +66,11 @@ func Query(args []string) error {
 	tScope := time.Since(t1)
 
 	t2 := time.Now()
-	r := &retrieve.Retriever{Store: s}
+	r := &retrieve.Retriever{
+		Store:    s,
+		Embedder: embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model),
+		Model:    cfg.Ollama.Model,
+	}
 	cands, err := r.Retrieve(ctx, gate.Query, sc)
 	if err != nil {
 		return err
@@ -99,7 +104,11 @@ func Query(args []string) error {
 			if c.Pinned {
 				pin = "[pin]"
 			}
-			fmt.Printf("  %s %.5f  %-30s %s\n", pin, c.Score, c.Card.ID, c.Card.Title)
+			arm := "bm25"
+			if c.Vec != nil {
+				arm = "hybr"
+			}
+			fmt.Printf("  %s %s %.5f  %-30s %s\n", pin, arm, c.Score, c.Card.ID, c.Card.Title)
 		}
 		fmt.Printf("\ninjection (%d tokens):\n%s\n", inj.Tokens, inj.Render())
 	}

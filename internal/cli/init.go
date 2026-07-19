@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/store"
@@ -95,8 +96,34 @@ ollama:
 	} else {
 		fmt.Println("hooks:    already registered")
 	}
+	registerMCP()
 	fmt.Println("\nSeed cards into", kdir, "then run `culi index`.")
 	return nil
+}
+
+// registerMCP registers `culi mcp` as a user-scope MCP server via the claude
+// CLI — the CLI owns ~/.claude.json, so we never edit that file ourselves
+// (C4). Best-effort: a missing/odd claude binary just prints the manual step.
+func registerMCP() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	manual := fmt.Sprintf("mcp:      run: claude mcp add --scope user culi -- %s mcp", exe)
+	claude, err := exec.LookPath("claude")
+	if err != nil {
+		fmt.Println(manual)
+		return
+	}
+	if exec.Command(claude, "mcp", "get", "culi").Run() == nil {
+		fmt.Println("mcp:      already registered")
+		return
+	}
+	if out, err := exec.Command(claude, "mcp", "add", "--scope", "user", "culi", "--", exe, "mcp").CombinedOutput(); err != nil {
+		fmt.Printf("warning:  claude mcp add failed (%v: %s)\n%s\n", err, strings.TrimSpace(string(out)), manual)
+		return
+	}
+	fmt.Println("mcp:      registered (user scope) — tools: search_context, expand_card, save_lesson")
 }
 
 // registerHooks merges culi's three hook entries into ~/.claude/settings.json,

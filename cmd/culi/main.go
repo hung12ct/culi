@@ -16,11 +16,13 @@ import (
 const usage = `culi — context orchestrator for Claude Code
 
 Usage:
-  culi init                     set up ~/.culi and register Claude Code hooks
+  culi init                     set up ~/.culi, register hooks + MCP server
   culi hook <event>             hook handler (stdin JSON → stdout JSON; internal)
-  culi index [--full]           sync knowledge/ into the SQLite index
+  culi mcp                      MCP stdio server (spawned by Claude Code; internal)
+  culi index [--full]           sync knowledge/ into the index + embed changed cards
   culi query [--timing] <text>  debug retrieval from the terminal
   culi card list|show|rm <id>   inspect the card store
+  culi down <id>                downvote a card (ranks lower, never removed)
   culi import scan|merge|apply  reconcile drifted .claude dirs into the store
   culi export [--check]         regenerate ~/.claude agents/skills from cards
 `
@@ -34,8 +36,12 @@ func main() {
 	case "hook":
 		// The hook path owns stdout and always exits 0 (fail-open).
 		os.Exit(hook.Run(os.Args[2:], os.Stdin, os.Stdout))
+	case "mcp":
+		exit(cli.MCP(os.Args[2:]))
 	case "init":
 		exit(cli.Init(os.Args[2:]))
+	case "down":
+		exit(cli.Down(os.Args[2:]))
 	case "index":
 		exit(cli.Index(os.Args[2:]))
 	case "query":
