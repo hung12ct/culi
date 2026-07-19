@@ -69,6 +69,19 @@ func Learn(args []string) error {
 	if sum.StyleObs > 0 {
 		logf("style observations: +%d (synthesized periodically)", sum.StyleObs)
 	}
+	if sum.Patterns.Branches > 0 || len(sum.Patterns.Retired) > 0 {
+		logf("pattern index: %d branch(es) mined", sum.Patterns.Branches)
+		for _, id := range sum.Patterns.Created {
+			logf("pattern  %s", id)
+		}
+		for _, id := range sum.Patterns.Retired {
+			logf("pattern retired %s (branch deleted, unmerged)", id)
+		}
+		for _, n := range sum.Patterns.Skipped {
+			logf("pattern skipped %s", n)
+		}
+		sum.Notes = append(sum.Notes, sum.Patterns.Notes...)
+	}
 	if sum.Style.Ran {
 		logf("style synthesis: %d group(s)", sum.Style.Groups)
 		for _, id := range sum.Style.Created {
