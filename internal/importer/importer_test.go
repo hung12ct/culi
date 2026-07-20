@@ -2,6 +2,7 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,7 +117,7 @@ func TestMergeMechanicalOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	kdir := t.TempDir()
-	res, err := Merge(context.Background(), kdir, rep, nil, false)
+	res, err := Merge(context.Background(), kdir, rep, nil, MergeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +191,7 @@ func TestMergeWithLLM(t *testing.T) {
 		t.Fatal(err)
 	}
 	kdir := t.TempDir()
-	res, err := Merge(context.Background(), kdir, rep, fakeMerger{}, false)
+	res, err := Merge(context.Background(), kdir, rep, fakeMerger{}, MergeOpts{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,10 +224,10 @@ func TestMergeWithLLM(t *testing.T) {
 		t.Errorf("residual: %v %q", err, raw)
 	}
 	// Re-merge without force must refuse the dirty staging area.
-	if _, err := Merge(context.Background(), kdir, rep, nil, false); err == nil {
+	if _, err := Merge(context.Background(), kdir, rep, nil, MergeOpts{}); err == nil {
 		t.Error("expected non-empty staging refusal")
 	}
-	if _, err := Merge(context.Background(), kdir, rep, nil, true); err != nil {
+	if _, err := Merge(context.Background(), kdir, rep, nil, MergeOpts{Force: true}); err != nil {
 		t.Errorf("force re-merge: %v", err)
 	}
 }
@@ -237,7 +238,7 @@ func TestApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	kdir := t.TempDir()
-	if _, err := Merge(context.Background(), kdir, rep, fakeMerger{}, false); err != nil {
+	if _, err := Merge(context.Background(), kdir, rep, fakeMerger{}, MergeOpts{}); err != nil {
 		t.Fatal(err)
 	}
 	// Pre-existing different card at a staged path → conflict.
@@ -277,5 +278,61 @@ func TestApply(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(kdir, ".import", "staged", "residual")); err != nil {
 		t.Errorf("residual removed from staging: %v", err)
+	}
+}
+
+// failDecompose completes clusters but dies on CLAUDE.md — an interrupted run.
+type failDecompose struct{ fakeMerger }
+
+func (failDecompose) DecomposeClaudeMD(context.Context, ClaudeMDInput) (Decomposition, error) {
+	return Decomposition{}, errBoom
+}
+
+// failCluster proves resume never re-runs finished cluster merges.
+type failCluster struct{ fakeMerger }
+
+func (failCluster) MergeCluster(context.Context, ClusterInput) (ClusterMerge, error) {
+	return ClusterMerge{}, errBoom
+}
+
+var errBoom = errors.New("boom")
+
+func TestMergeResume(t *testing.T) {
+	rep, err := Scan(fixtureRepos(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kdir := t.TempDir()
+	if _, err := Merge(context.Background(), kdir, rep, failDecompose{}, MergeOpts{}); err == nil {
+		t.Fatal("expected the interrupted run to fail")
+	}
+	if !HasProgress(kdir) {
+		t.Fatal("interrupted run left no progress")
+	}
+	// Resume with a merger whose MergeCluster always fails: success proves the
+	// diverged cluster was skipped, not re-paid for.
+	res, err := Merge(context.Background(), kdir, rep, failCluster{}, MergeOpts{Resume: true})
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	staged := filepath.Join(kdir, ".import", "staged")
+	if _, err := knowledge.ReadCard(staged, "skills/div/SKILL.md"); err != nil {
+		t.Errorf("first run's diverged card lost: %v", err)
+	}
+	if _, err := knowledge.ReadCard(staged, "rules/table-tests.md"); err != nil {
+		t.Errorf("resumed run's decomposed card missing: %v", err)
+	}
+	found := false
+	for _, n := range res.Notes {
+		if strings.Contains(n, "resume:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no resume note in %v", res.Notes)
+	}
+	// Completion clears progress so a later fresh merge skips nothing.
+	if HasProgress(kdir) {
+		t.Error("progress not cleared after completed resume")
 	}
 }

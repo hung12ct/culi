@@ -84,12 +84,18 @@ func printScan(rep importer.Report) {
 		counts["identical"], counts["superset"], counts["diverged"], counts["unique"], len(rep.ClaudeMD))
 }
 
+// mergeTimeout bounds the whole merge run. Sized for the slowest transport:
+// ~20 Sonnet calls through `claude -p` at 60–90s each. A 15-minute budget
+// (fine for the API backend) SIGKILLed real CLI runs mid-call.
+const mergeTimeout = 60 * time.Minute
+
 // importMerge stages canonical cards. Diverged clusters and CLAUDE.md need a
 // merge backend — resolved from config/flags, defaulting to whatever the user
 // already has (API key, claude CLI subscription, or local Ollama).
 func importMerge(args []string) error {
 	fs := flag.NewFlagSet("import merge", flag.ContinueOnError)
 	force := fs.Bool("force", false, "overwrite an existing non-empty staging area")
+	resume := fs.Bool("resume", false, "continue an interrupted merge, skipping already-staged units")
 	noLLM := fs.Bool("no-llm", false, "mechanical merge only; skip diverged clusters and CLAUDE.md decomposition")
 	provider := fs.String("provider", "", "merge backend: auto|anthropic|claude-cli|ollama|none (default: import.provider)")
 	model := fs.String("model", "", "override import.merge_model")
@@ -120,11 +126,17 @@ func importMerge(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *force && *resume {
+		return fmt.Errorf("cli: --force and --resume conflict — force restarts, resume continues")
+	}
 	fmt.Printf("merge:  %s\n", desc)
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), mergeTimeout)
 	defer cancel()
-	res, err := importer.Merge(ctx, kdir, rep, m, *force)
+	res, err := importer.Merge(ctx, kdir, rep, m, importer.MergeOpts{Force: *force, Resume: *resume})
 	if err != nil {
+		if importer.HasProgress(kdir) {
+			fmt.Println("tip:    finished units are kept — continue with `culi import merge --resume`")
+		}
 		return err
 	}
 	for _, s := range res.Staged {
