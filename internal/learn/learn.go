@@ -191,6 +191,23 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		}
 	}
 
+	// Janitor: auto-retire mined candidates left unreinforced past the TTL.
+	// Zero-cost (local file ops, no backend), so it runs even after a cap hit.
+	// Only candidates are touched — dormant confirmed cards are reported by
+	// `culi stats`, never deleted (C4).
+	kdir := config.KnowledgeDir(base)
+	ttl := time.Duration(cfg.Learn.CandidateTTLDays) * 24 * time.Hour
+	if stale, err := mine.RetireStaleCandidates(ctx, s, kdir, ttl, time.Now().UTC()); err != nil {
+		sum.Notes = append(sum.Notes, "candidate janitor: "+firstNoteLine(err))
+	} else if len(stale) > 0 {
+		sum.Retired = append(sum.Retired, stale...)
+		sum.Notes = append(sum.Notes, fmt.Sprintf("%d stale candidate(s) auto-retired (>%dd unreinforced)",
+			len(stale), cfg.Learn.CandidateTTLDays))
+		if _, err := indexer.Sync(ctx, s, kdir); err != nil {
+			sum.Notes = append(sum.Notes, "janitor reindex: "+firstNoteLine(err))
+		}
+	}
+
 	// Vectors for anything new, so next run's dedup can use the embed arm.
 	if len(sum.Created)+len(sum.Style.Created)+len(sum.Patterns.Created) > 0 || len(sum.Reinforced) > 0 {
 		ectx, cancel := context.WithTimeout(ctx, embedBudget)

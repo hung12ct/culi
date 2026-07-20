@@ -91,6 +91,8 @@ ollama:
 #   strong_model: claude-sonnet-5
 #   daily_usd_cap: 0.50    # anthropic API only; claude-cli/ollama cost $0
 #   daily_call_cap: 40     # all backends - the subscription-quota guard
+#   candidate_ttl_days: 30 # auto-retire candidates unreinforced this long;
+#                          # -1 disables. Confirmed cards are never auto-retired.
 `
 		if err := os.WriteFile(cfgPath, []byte(defaultCfg), 0o644); err != nil {
 			return fmt.Errorf("cli: writing config.yaml: %w", err)
