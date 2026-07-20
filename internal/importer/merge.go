@@ -91,38 +91,71 @@ type MergeResult struct {
 	Usage   Usage
 }
 
+// MergeOpts controls how Merge treats an existing staging area.
+type MergeOpts struct {
+	Force  bool // wipe staged output and progress, start over
+	Resume bool // keep staged output, skip units already recorded as done
+}
+
 // Merge stages every cluster and CLAUDE.md decomposition into
 // knowledge/.import/staged/. It never touches knowledge/ proper. An existing
-// non-empty staging area is refused unless force — it may hold un-applied
-// review edits (contract C4).
-func Merge(ctx context.Context, knowledgeDir string, rep Report, m Merger, force bool) (MergeResult, error) {
+// non-empty staging area is refused unless Force or Resume — it may hold
+// un-applied review edits (contract C4). Progress is recorded per unit so an
+// interrupted run resumes without repeating finished LLM calls.
+func Merge(ctx context.Context, knowledgeDir string, rep Report, m Merger, opts MergeOpts) (MergeResult, error) {
 	staged := filepath.Join(knowledgeDir, ".import", "staged")
-	if entries, err := os.ReadDir(staged); err == nil && len(entries) > 0 && !force {
-		if len(entries) == 1 && entries[0].Name() == "residual" {
-			return MergeResult{}, fmt.Errorf("importer: %s still holds residual CLAUDE.md files awaiting manual placement in their repos — place (then delete) them, or re-merge with --force to regenerate", staged)
+	progress := progressPath(knowledgeDir)
+	done := map[string]bool{}
+	if opts.Resume {
+		done = readProgress(progress)
+	} else {
+		if entries, err := os.ReadDir(staged); err == nil && len(entries) > 0 && !opts.Force {
+			if len(entries) == 1 && entries[0].Name() == "residual" {
+				return MergeResult{}, fmt.Errorf("importer: %s still holds residual CLAUDE.md files awaiting manual placement in their repos — place (then delete) them, or re-merge with --force to regenerate", staged)
+			}
+			return MergeResult{}, fmt.Errorf("importer: %s is not empty — `culi import apply` it, re-merge with --force, or continue an interrupted merge with --resume", staged)
 		}
-		return MergeResult{}, fmt.Errorf("importer: %s is not empty — `culi import apply` it or re-merge with --force", staged)
-	}
-	if err := os.RemoveAll(staged); err != nil {
-		return MergeResult{}, fmt.Errorf("importer: clearing staging: %w", err)
+		if err := os.RemoveAll(staged); err != nil {
+			return MergeResult{}, fmt.Errorf("importer: clearing staging: %w", err)
+		}
+		_ = os.Remove(progress)
 	}
 	var res MergeResult
-	for _, cl := range rep.Clusters {
-		if err := ctx.Err(); err != nil {
-			return res, fmt.Errorf("importer: merge interrupted: %w", err)
+	resumed := 0
+	step := func(key string, run func() error) error {
+		if done[key] {
+			resumed++
+			return nil
 		}
-		if err := mergeCluster(ctx, staged, cl, m, &res); err != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("importer: merge interrupted: %w", err)
+		}
+		if err := run(); err != nil {
+			return err
+		}
+		done[key] = true
+		return writeProgress(progress, done)
+	}
+	for _, cl := range rep.Clusters {
+		cl := cl
+		if err := step("cluster:"+cl.Key, func() error {
+			return mergeCluster(ctx, staged, cl, m, &res)
+		}); err != nil {
 			return res, err
 		}
 	}
 	for _, it := range rep.ClaudeMD {
-		if err := ctx.Err(); err != nil {
-			return res, fmt.Errorf("importer: merge interrupted: %w", err)
-		}
-		if err := mergeClaudeMD(ctx, staged, it, m, &res); err != nil {
+		it := it
+		if err := step("claudemd:"+it.Repo, func() error {
+			return mergeClaudeMD(ctx, staged, it, m, &res)
+		}); err != nil {
 			return res, err
 		}
 	}
+	if resumed > 0 {
+		res.Notes = append(res.Notes, fmt.Sprintf("resume: %d already-staged units skipped", resumed))
+	}
+	_ = os.Remove(progress) // complete — a later fresh merge must not skip
 	return res, nil
 }
 
