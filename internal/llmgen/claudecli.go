@@ -77,7 +77,13 @@ func (g *cliGen) invoke(ctx context.Context, prompt string) (cliResult, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return res, fmt.Errorf("running claude -p: %w (%s)", err, firstLineOf(stderr.String()))
+		// The CLI often writes its real complaint ("Not logged in", quota
+		// messages) to STDOUT — surface both streams or the error is a blank.
+		detail := firstLineOf(stderr.String())
+		if detail == "" {
+			detail = firstLineOf(stdout.String())
+		}
+		return res, fmt.Errorf("running claude -p: %w (%s)", err, detail)
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &res); err != nil {
 		return res, fmt.Errorf("decoding claude -p wrapper: %w", err)
