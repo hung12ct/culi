@@ -54,6 +54,11 @@ type LearnConfig struct {
 	// DailyCallCap bounds model calls per day on every backend — the
 	// subscription-quota guard for claude-cli. 0 = default.
 	DailyCallCap int `yaml:"daily_call_cap"`
+	// CandidateTTLDays auto-retires mined candidate cards left unreinforced for
+	// this many days (file mtime is the clock). 0 = default (30); a negative
+	// value disables the janitor. Confirmed cards are NEVER auto-retired —
+	// dormant ones are only reported by `culi stats` (C4).
+	CandidateTTLDays int `yaml:"candidate_ttl_days"`
 }
 
 // ImportConfig tunes `culi import merge`.
@@ -86,6 +91,7 @@ const (
 	defaultStrongModel    = "claude-sonnet-5"
 	defaultDailyUSDCap    = 0.50
 	defaultDailyCallCap   = 40
+	defaultCandidateTTL   = 30 // days a candidate may sit unreinforced
 )
 
 // BaseDir returns the culi home directory: $CULI_HOME if set, else ~/.culi.
@@ -127,6 +133,7 @@ func Load(base string) (Config, error) {
 			Enabled: true, Provider: "auto",
 			CheapModel: defaultCheapModel, StrongModel: defaultStrongModel,
 			DailyUSDCap: defaultDailyUSDCap, DailyCallCap: defaultDailyCallCap,
+			CandidateTTLDays: defaultCandidateTTL,
 		},
 	}
 	raw, err := os.ReadFile(filepath.Join(base, "config.yaml"))
@@ -171,6 +178,11 @@ func Load(base string) (Config, error) {
 	}
 	if cfg.Learn.DailyCallCap <= 0 {
 		cfg.Learn.DailyCallCap = defaultDailyCallCap
+	}
+	// Only the zero value defaults — a negative value is the explicit
+	// "disable the janitor" signal and must survive.
+	if cfg.Learn.CandidateTTLDays == 0 {
+		cfg.Learn.CandidateTTLDays = defaultCandidateTTL
 	}
 	return cfg, nil
 }
