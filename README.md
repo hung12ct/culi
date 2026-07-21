@@ -122,22 +122,37 @@ Both must pass before any call; they reset at **UTC midnight**:
 A deterministic auth/config failure (logged-out CLI, bad key) does **not** count against the
 cap — it halts the run and keeps jobs queued, so a misconfig can't silently drain your budget.
 
-### Auth for background (headless) learning
+### Auth
 
-When learning runs from the hook, Claude Code does **not** pass its OAuth token (or an API key)
-to the spawned process — so background mining gets "Not logged in". Point culi at a credential
-**file** (secrets are read from the file and never logged; `~` expands):
+For **manual** runs and the metered API, culi uses standard auth — nothing culi-specific:
 
-```yaml
-learn:
-  # subscription (free): a file holding CLAUDE_CODE_OAUTH_TOKEN
-  oauth_token_file: ~/.claude-tokens/account.token
-  # OR metered API (paid): a file holding ANTHROPIC_API_KEY
-  # anthropic_api_key_file: ~/.anthropic/api-key
-```
+- **API key** — set `ANTHROPIC_API_KEY` in your environment, like any tool. `provider: auto`
+  picks the Anthropic API whenever the key is present.
+- **Subscription** — culi shells out to `claude -p`, which uses however your `claude` CLI is
+  authenticated in that shell.
 
-Running `culi learn` **manually** from your terminal needs neither — it inherits the token
-from your shell environment.
+So `culi learn` **from your terminal** just works — it inherits whatever your shell already has.
+
+**The catch is background (hook-spawned) learning.** The session-end hook runs culi as a
+*detached* process that does **not** inherit your interactive shell's environment — so an
+`ANTHROPIC_API_KEY` (or `CLAUDE_CODE_OAUTH_TOKEN`) you `export`ed in your shell doesn't reach it,
+and it fails with "Not logged in". Fix it either way:
+
+1. **Put the credential where the detached process sees it** — a system-wide env var
+   (`launchctl setenv ANTHROPIC_API_KEY …` on macOS), or launch Claude Code from a shell that
+   already has it.
+2. **Point culi at a credential file** (fallback; secrets are read from the file, never logged;
+   `~` expands):
+
+   ```yaml
+   learn:
+     oauth_token_file: ~/.claude-tokens/account.token  # subscription token (CLAUDE_CODE_OAUTH_TOKEN)
+     # anthropic_api_key_file: ~/.anthropic/api-key     # OR metered API key (ANTHROPIC_API_KEY)
+   ```
+
+The file is **only** for the headless case — if the env var already reaches the process, culi
+uses it and no file is needed. (Whether a persisted `claude auth login` alone satisfies headless
+`claude -p` is environment-dependent; the token file is the reliable route.)
 
 ### Running it manually
 
