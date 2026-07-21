@@ -88,6 +88,83 @@ A local web UI to see and steer everything culi does: a health **overview** with
 
 ---
 
+## Learning & cost
+
+The **hot path is free** — hooks, retrieval, and packing make *zero* LLM calls. Only
+**learning** talks to a model: it mines your session transcripts into candidate lessons/rules,
+synthesizes coding style, and turns git history into `CLAUDE.md` + repo cards. It runs
+**in the background after a session ends** (via the session-end hook) and can be run by hand
+with `culi learn`.
+
+### Backends & cost
+
+Pick a backend with `learn.provider` (default `auto`):
+
+| Provider | Cost | How | Notes |
+|---|---|---|---|
+| `claude-cli` | **Free** | Shells out to `claude -p` on your Claude Code subscription | `$0.00` in the spend meter |
+| `anthropic` | **Paid** (metered) | Anthropic API via [gopheragent](https://github.com/hung12ct/gopheragent) + `ANTHROPIC_API_KEY` | Tracks real USD; capped by `daily_usd_cap` |
+| `ollama` | **Free** (local) | Local models — set `cheap_model`/`strong_model` to non-Claude models | Runs on your machine |
+| `none` | — | Disabled | Mining queues but never calls a model |
+
+`auto` prefers the Anthropic API when a key is available (env **or** `anthropic_api_key_file`),
+otherwise falls back to the free `claude-cli`.
+
+### Spend caps (hard limits)
+
+Both must pass before any call; they reset at **UTC midnight**:
+
+- **`daily_usd_cap`** (default `$0.50`) — bounds estimated API spend. Only bites on the
+  `anthropic` backend; `claude-cli`/`ollama` cost `$0`.
+- **`daily_call_cap`** (default `40`) — bounds model calls on *every* backend — the
+  subscription-quota guard.
+
+A deterministic auth/config failure (logged-out CLI, bad key) does **not** count against the
+cap — it halts the run and keeps jobs queued, so a misconfig can't silently drain your budget.
+
+### Auth for background (headless) learning
+
+When learning runs from the hook, Claude Code does **not** pass its OAuth token (or an API key)
+to the spawned process — so background mining gets "Not logged in". Point culi at a credential
+**file** (secrets are read from the file and never logged; `~` expands):
+
+```yaml
+learn:
+  # subscription (free): a file holding CLAUDE_CODE_OAUTH_TOKEN
+  oauth_token_file: ~/.claude-tokens/account.token
+  # OR metered API (paid): a file holding ANTHROPIC_API_KEY
+  # anthropic_api_key_file: ~/.anthropic/api-key
+```
+
+Running `culi learn` **manually** from your terminal needs neither — it inherits the token
+from your shell environment.
+
+### Running it manually
+
+```bash
+culi learn              # mine queued transcripts once, print results
+culi learn --from-start # ignore cursors, re-mine every transcript from scratch
+culi learn --style      # force style synthesis now (bypass the trigger policy)
+culi learn --auto       # background mode (quiet, logs to ~/.culi/logs/learn.log) — used by the hook
+```
+
+Full config (all optional; shown with defaults):
+
+```yaml
+learn:
+  enabled: true
+  provider: auto              # auto | anthropic | claude-cli | ollama | none
+  cheap_model: claude-haiku-4-5
+  strong_model: claude-sonnet-5
+  daily_usd_cap: 0.50         # anthropic backend only
+  daily_call_cap: 40          # all backends
+  candidate_ttl_days: 30      # auto-retire unreviewed candidates; -1 disables
+  oauth_token_file: ""        # headless subscription auth (see above)
+  anthropic_api_key_file: ""  # headless API auth (see above)
+```
+
+---
+
 ## Commands
 
 | Command | What it does |
