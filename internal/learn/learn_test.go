@@ -3,6 +3,7 @@ package learn
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,6 +96,80 @@ func TestRunEndToEndOverStubCLI(t *testing.T) {
 	sum2, err := Run(context.Background(), base, cfg, Options{}, t.Logf)
 	if err != nil || sum2.Jobs != 0 {
 		t.Errorf("second run = %+v, %v", sum2, err)
+	}
+}
+
+// TestRunNoCapParallelDrain exercises the --no-cap parallel path (bounded pool,
+// WriteMu-serialized store writes, concurrent ledger). Run under -race.
+func TestRunNoCapParallelDrain(t *testing.T) {
+	base, cfg := setupBase(t) // seeds job1
+	stubClaude(t, minePayload)
+	cfg.Learn.Provider = "claude-cli"
+	cfg.Ollama.Endpoint = "http://127.0.0.1:1" // dead: lexical dedup
+
+	seedSessions(t, base, 5) // + jobs 2..6 so the drain has jobs to fan out
+
+	sum, err := Run(context.Background(), base, cfg, Options{IgnoreCaps: true}, t.Logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Jobs != 6 {
+		t.Fatalf("jobs = %d, want 6; summary = %+v", sum.Jobs, sum)
+	}
+	if jobs, _ := queue.List(config.InboxDir(base)); len(jobs) != 0 {
+		t.Errorf("parallel drain left %d jobs queued", len(jobs))
+	}
+	if len(sum.Created) == 0 { // exact count is nondeterministic under concurrency
+		t.Errorf("no cards created: %+v", sum)
+	}
+}
+
+// seedSessions writes n extra minable transcripts + jobs into base.
+func seedSessions(t *testing.T, base string, n int) {
+	t.Helper()
+	lines := strings.Join([]string{
+		`{"type":"user","message":{"role":"user","content":"write the client"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"done with panics"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"No, wrong - wrap errors instead of panicking"}}`,
+	}, "\n") + "\n"
+	for i := 2; i <= n+1; i++ {
+		tp := filepath.Join(base, fmt.Sprintf("session%d.jsonl", i))
+		if err := os.WriteFile(tp, []byte(lines), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		job := fmt.Sprintf(`{"session_id":"s%d","transcript_path":%q,"cwd":%q,"enqueued_at":"2026-07-19T00:00:0%dZ"}`, i, tp, base, i)
+		if err := os.WriteFile(filepath.Join(config.InboxDir(base), fmt.Sprintf("job%d.json", i)), []byte(job), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A logged-out backend during a --no-cap parallel drain must halt, keep every
+// job QUEUED, and park nothing (an env problem, not bad transcripts).
+func TestRunNoCapParallelHaltOnBackendDown(t *testing.T) {
+	base, cfg := setupBase(t) // job1
+	seedSessions(t, base, 5)  // + jobs 2..6
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncat > /dev/null\necho 'Not logged in · Please run /login'\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	cfg.Learn.Provider = "claude-cli"
+	cfg.Ollama.Endpoint = "http://127.0.0.1:1"
+
+	sum, err := Run(context.Background(), base, cfg, Options{IgnoreCaps: true}, t.Logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sum.BackendDown {
+		t.Errorf("want BackendDown, got %+v", sum)
+	}
+	if jobs, _ := queue.List(config.InboxDir(base)); len(jobs) != 6 {
+		t.Errorf("jobs not kept queued on backend-down: %d of 6 remain", len(jobs))
+	}
+	if failed, _ := os.ReadDir(filepath.Join(config.InboxDir(base), "failed")); len(failed) > 0 {
+		t.Errorf("jobs parked on a backend problem: %d", len(failed))
 	}
 }
 

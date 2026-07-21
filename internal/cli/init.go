@@ -93,6 +93,8 @@ ollama:
 #   daily_call_cap: 40     # all backends - the subscription-quota guard
 #   candidate_ttl_days: 30 # auto-retire candidates unreinforced this long;
 #                          # -1 disables. Confirmed cards are never auto-retired.
+#   max_jobs_per_run: 50   # transcripts mined per learn run, newest first;
+#                          # -1 = no limit. learn --no-cap drains everything.
 #   # Headless-learning auth (pick ONE; both empty/unset = off, ~ expands):
 #   # Claude Code doesn't pass its OAuth token or an API key to hook-spawned
 #   # processes, so background mining gets "Not logged in". Point culi at a file:

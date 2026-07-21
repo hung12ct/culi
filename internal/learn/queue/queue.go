@@ -76,7 +76,9 @@ func List(inboxDir string) ([]Job, error) {
 		j.path, j.attempts = path, attempts
 		jobs = append(jobs, j)
 	}
-	sort.Slice(jobs, func(a, b int) bool { return jobs[a].EnqueuedAt < jobs[b].EnqueuedAt })
+	// Newest first: recent conversations carry the most relevant lessons, and a
+	// per-run limit (learn.max_jobs_per_run) should keep the freshest ones.
+	sort.Slice(jobs, func(a, b int) bool { return jobs[a].EnqueuedAt > jobs[b].EnqueuedAt })
 	return jobs, nil
 }
 

@@ -23,6 +23,7 @@ type statusPayload struct {
 	Cards         int     `json:"cards"`
 	SavedPct      string  `json:"savedPct"`
 	ToReview      int     `json:"toReview"`
+	ToLearn       int     `json:"toLearn"` // queued transcripts waiting to be mined
 	Addr          string  `json:"addr"`
 	SpendToday    float64 `json:"spendToday"`
 	SpendCap      float64 `json:"spendCap"`
@@ -220,8 +221,9 @@ type statsView struct {
 		Stale []string `json:"stale"`
 	} `json:"cards"`
 	Learning struct {
-		FailedJobs int `json:"failed_jobs"`
-		SpendToday struct {
+		InboxPending int `json:"inbox_pending"`
+		FailedJobs   int `json:"failed_jobs"`
+		SpendToday   struct {
 			Calls int     `json:"calls"`
 			USD   float64 `json:"usd"`
 		} `json:"spend_today"`
@@ -256,6 +258,7 @@ func (s *server) buildStatus(ctx context.Context) statusPayload {
 		Cards:         len(metas),
 		SavedPct:      fmtPct(sv.Retrieval.Counterfactual.DumpTokens, sv.Retrieval.Counterfactual.SavedPercent),
 		ToReview:      toReview,
+		ToLearn:       sv.Learning.InboxPending,
 		Addr:          s.addr,
 		SpendToday:    sv.Learning.SpendToday.USD,
 		SpendCap:      s.config().Learn.DailyUSDCap,
@@ -557,6 +560,14 @@ func (s *server) buildSettings() settingsPayload {
 		{Title: "Caps & spend", Items: []setItem{
 			{Key: "daily_usd_cap", Desc: "hard stop on learn spend", Value: fmt.Sprintf("%.2f", c.Learn.DailyUSDCap), Width: "80px"},
 			{Key: "daily_call_cap", Desc: "model calls per day", Value: itoa(c.Learn.DailyCallCap), Width: "70px"},
+			{Key: "max_jobs_per_run", Desc: "transcripts mined per run, newest first (−1 = no limit)", Value: itoa(c.Learn.MaxJobsPerRun), Width: "70px"},
+		}},
+		{Title: "Learning backend", Items: []setItem{
+			{Key: "provider", Desc: "auto · anthropic · claude-cli · ollama · none", Value: c.Learn.Provider, Width: "120px"},
+			{Key: "cheap_model", Desc: "routine mining model (e.g. qwen3 for ollama)", Value: c.Learn.CheapModel, Width: "180px"},
+			{Key: "strong_model", Desc: "escalation model on schema failure", Value: c.Learn.StrongModel, Width: "180px"},
+			{Key: "oauth_token_file", Desc: "file with CLAUDE_CODE_OAUTH_TOKEN (headless subscription auth)", Value: c.Learn.OAuthTokenFile, Width: "260px"},
+			{Key: "anthropic_api_key_file", Desc: "file with ANTHROPIC_API_KEY (headless metered API)", Value: c.Learn.AnthropicAPIKeyFile, Width: "260px"},
 		}},
 		{Title: "Gate", Items: []setItem{
 			{Key: "extra_acks", Desc: "always-skip acknowledgements", Value: strings.Join(c.ExtraAcks, ", "), Width: "160px"},

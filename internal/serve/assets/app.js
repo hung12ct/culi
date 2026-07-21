@@ -133,6 +133,7 @@ function renderStrip() {
   set('s-cards', st.cards != null ? st.cards : '—');
   set('s-saved', st.savedPct != null ? st.savedPct : '—');
   set('s-review', (state.candidates ? state.candidates.length : (st.toReview != null ? st.toReview : '—')));
+  set('s-learn', st.toLearn != null ? st.toLearn : '—');
   set('s-addr', st.addr || 'localhost:7378');
   const dot = document.getElementById('serve-dot');
   if (dot) dot.classList.toggle('down', st.serveDown === true);
@@ -967,10 +968,16 @@ async function saveConfig() {
   const inputs = document.querySelectorAll('.set-input');
   const patch = {};
   inputs.forEach(i => { patch[i.dataset.key] = i.value; });
-  try {
-    await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
-    showToast('Saved to config.yaml', '#3ec7bb');
-  } catch { showToast('Offline — config not written', '#e6ac5c'); }
+  const res = await postJSON('/api/config', patch);
+  if (res && res.saved === false) {
+    showToast(res.note || 'not saved', '#e6ac5c');
+    return;
+  }
+  // Server wrote config.yaml and reloaded its snapshot; refresh Settings so the
+  // displayed values match what landed on disk.
+  showToast('Saved to config.yaml', '#3ec7bb');
+  state.settings = null;
+  if (state.screen === 'settings') goto('settings');
 }
 
 // ---------- keyboard ----------

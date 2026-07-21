@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -38,6 +39,10 @@ type Miner struct {
 	Emb      embed.Embedder // nil ⇒ lexical dedup only
 	EmbModel string
 	Logf     func(format string, args ...any) // optional diagnostics
+	// WriteMu, when set, serializes the store-writing tail (apply + reindex)
+	// across concurrent MineSession calls — the index is single-writer (WAL),
+	// so a --no-cap parallel drain fans out the LLM calls but funnels writes.
+	WriteMu *sync.Mutex
 
 	vecs map[int64][]float32 // lazy per-run cache of card embeddings
 }
@@ -100,13 +105,23 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 		res.Notes = append(res.Notes, "model: "+firstLine(out.Notes))
 	}
 
-	if err := m.apply(ctx, job, repo, out, &res); err != nil {
-		return res, cur, err
-	}
-	// One sync picks up everything written above; candidates index with
+	// apply + reindex touch the single-writer index; serialize them when a
+	// parallel drain shares this miner (WriteMu). The LLM call above already ran
+	// lock-free. One sync picks up everything written; candidates index with
 	// status=candidate and stay out of retrieval until confirmed.
-	if _, err := indexer.Sync(ctx, m.Store, config.KnowledgeDir(m.Base)); err != nil {
-		return res, cur, err
+	werr := func() error {
+		if m.WriteMu != nil {
+			m.WriteMu.Lock()
+			defer m.WriteMu.Unlock()
+		}
+		if err := m.apply(ctx, job, repo, out, &res); err != nil {
+			return err
+		}
+		_, err := indexer.Sync(ctx, m.Store, config.KnowledgeDir(m.Base))
+		return err
+	}()
+	if werr != nil {
+		return res, cur, werr
 	}
 	return res, next, nil
 }

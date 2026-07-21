@@ -110,6 +110,28 @@ Pick a backend with `learn.provider` (default `auto`):
 `auto` prefers the Anthropic API when a key is available (env **or** `anthropic_api_key_file`),
 otherwise falls back to the free `claude-cli`.
 
+### Local models (Ollama) — free, private, no auth
+
+The `ollama` backend sidesteps credentials entirely: mining runs on a local model, nothing leaves
+your machine, and there's no token/key/Keychain to manage. culi enforces the JSON schema
+server-side (Ollama's `format`), so structured output is reliable. Two steps:
+
+```bash
+ollama pull qwen3          # a general instruct model (not the embedding model)
+```
+```yaml
+learn:
+  provider: ollama
+  cheap_model: qwen3       # routine mining (must be a non-Claude model)
+  strong_model: qwen3      # escalation on schema failure
+ollama:
+  endpoint: http://localhost:11434   # same server as embeddings (default)
+```
+
+Trade-off: local models have weaker judgment than Claude about what's a *durable* lesson, so
+expect noisier candidates — your review queue is the quality gate. Speed is GPU-bound, and the
+`--no-cap` parallel drain helps less here (one Ollama instance tends to queue concurrent requests).
+
 ### Spend caps (hard limits)
 
 Both must pass before any call; they reset at **UTC midnight**:
@@ -122,27 +144,43 @@ Both must pass before any call; they reset at **UTC midnight**:
 A deterministic auth/config failure (logged-out CLI, bad key) does **not** count against the
 cap — it halts the run and keeps jobs queued, so a misconfig can't silently drain your budget.
 
-### Auth for background (headless) learning
+### Auth
 
-When learning runs from the hook, Claude Code does **not** pass its OAuth token (or an API key)
-to the spawned process — so background mining gets "Not logged in". Point culi at a credential
-**file** (secrets are read from the file and never logged; `~` expands):
+Background learning runs `claude -p` (or the Anthropic API) from a *detached* hook process, so it
+needs a credential that process can read. **A normal, persisted login is enough** — it lives on
+disk, so every process (including the background worker) uses it:
 
-```yaml
-learn:
-  # subscription (free): a file holding CLAUDE_CODE_OAUTH_TOKEN
-  oauth_token_file: ~/.claude-tokens/account.token
-  # OR metered API (paid): a file holding ANTHROPIC_API_KEY
-  # anthropic_api_key_file: ~/.anthropic/api-key
-```
+- **Subscription** — run `claude auth login` once. Background learning then just works, no
+  culi config needed.
+- **API key** — set `ANTHROPIC_API_KEY` where processes can see it (a login-shell / system env).
+  `provider: auto` uses it whenever present.
 
-Running `culi learn` **manually** from your terminal needs neither — it inherits the token
-from your shell environment.
+Manual `culi learn` from your terminal always works too — it inherits whatever your shell has.
+
+**The one gotcha is env-var-only auth.** If your *only* credential is an env var exported in your
+shell (e.g. `CLAUDE_CODE_OAUTH_TOKEN` in `.zshrc`, with no `claude auth login`), the detached hook
+process doesn't inherit it — background mining fails with "Not logged in" even though your terminal
+works. Two fixes:
+
+1. **Do a persisted `claude auth login`** (or put the key in a system-wide env) so the credential
+   is on disk rather than a shell-only variable. Simplest for most people.
+2. **Point culi at a credential file** (fallback; secrets are read from the file, never logged;
+   `~` expands):
+
+   ```yaml
+   learn:
+     oauth_token_file: ~/.claude-tokens/account.token  # holds CLAUDE_CODE_OAUTH_TOKEN
+     # anthropic_api_key_file: ~/.anthropic/api-key     # OR holds ANTHROPIC_API_KEY
+   ```
+
+   Useful when you keep credentials in files, or want learning to use a *different* account than
+   your interactive session.
 
 ### Running it manually
 
 ```bash
 culi learn              # mine queued transcripts once, print results
+culi learn --no-cap     # ignore the daily caps and drain the whole backlog in one run
 culi learn --from-start # ignore cursors, re-mine every transcript from scratch
 culi learn --style      # force style synthesis now (bypass the trigger policy)
 culi learn --auto       # background mode (quiet, logs to ~/.culi/logs/learn.log) — used by the hook
@@ -158,6 +196,7 @@ learn:
   strong_model: claude-sonnet-5
   daily_usd_cap: 0.50         # anthropic backend only
   daily_call_cap: 40          # all backends
+  max_jobs_per_run: 50        # transcripts mined per run, newest first; -1 = no limit
   candidate_ttl_days: 30      # auto-retire unreviewed candidates; -1 disables
   oauth_token_file: ""        # headless subscription auth (see above)
   anthropic_api_key_file: ""  # headless API auth (see above)
