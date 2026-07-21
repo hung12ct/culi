@@ -54,12 +54,14 @@ type failedJob struct {
 }
 type noisyItem struct {
 	ID    string `json:"id"`
+	Short string `json:"short"` // 4-hex id for the KB deep-link ("" if card gone)
 	Name  string `json:"name"`
 	Score string `json:"score"`
 }
 type staleItem struct {
-	Name string `json:"name"`
-	Last string `json:"last"`
+	Name  string `json:"name"`
+	Short string `json:"short"` // 4-hex id for the KB deep-link ("" if card gone)
+	Last  string `json:"last"`
 }
 type overviewPayload struct {
 	SavedPct    string      `json:"savedPct"`
@@ -107,6 +109,7 @@ type cardListItem struct {
 	Key         string   `json:"key"`
 	Summary     string   `json:"summary"`  // for client-side search
 	Triggers    []string `json:"triggers"` // keywords + aliases, for search
+	Stale       bool     `json:"stale"`    // never pulled in the retention window (KB "Stale" facet)
 }
 
 type usageTile struct {
@@ -278,6 +281,12 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 	metas, _ := s.store.AllCardsMeta(ctx)
 	cf := sv.Retrieval.Counterfactual
 
+	// Map full card id → short id so the noisy/stale rows can deep-link into the KB.
+	idToShort := make(map[string]string, len(metas))
+	for _, m := range metas {
+		idToShort[m.ID] = m.ShortID
+	}
+
 	trend := normalizeTrend(mustDaily(s.store.DailyTokens(ctx, 12)))
 
 	tiles := []tile{
@@ -297,14 +306,14 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 		if i >= 3 {
 			break
 		}
-		noisy = append(noisy, noisyItem{ID: n.ID, Name: n.ID, Score: fmt.Sprintf("%.1f", n.Score)})
+		noisy = append(noisy, noisyItem{ID: n.ID, Short: idToShort[n.ID], Name: n.ID, Score: fmt.Sprintf("%.1f", n.Score)})
 	}
 	var stale []staleItem
 	for i, id := range sv.Cards.Stale {
 		if i >= 3 {
 			break
 		}
-		stale = append(stale, staleItem{Name: id, Last: "—"})
+		stale = append(stale, staleItem{Name: id, Short: idToShort[id], Last: "—"})
 	}
 	staleMore := ""
 	if len(sv.Cards.Stale) > 3 {
@@ -371,6 +380,7 @@ func (s *server) buildCandidates(ctx context.Context) []candidatePayload {
 func (s *server) buildCards(ctx context.Context) []cardListItem {
 	metas, _ := s.store.AllCardsMeta(ctx)
 	stats, _ := s.store.AllCardStats(ctx, time.Now())
+	injected, _ := s.store.InjectedCardIDs(ctx)
 	out := make([]cardListItem, 0, len(metas))
 	for _, m := range metas {
 		triggers := append([]string{}, m.Triggers.Keywords...)
@@ -387,6 +397,7 @@ func (s *server) buildCards(ctx context.Context) []cardListItem {
 			Key:         m.Key,
 			Summary:     m.Summary,
 			Triggers:    triggers,
+			Stale:       isStale(m.Status, injected[m.ID], stats[m.ID]),
 		})
 	}
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Injected > out[b].Injected })
@@ -667,6 +678,19 @@ func granFromBuckets(sv statsView) granPayload {
 		ph = 0
 	}
 	return granPayload{Body: pb, Summary: ps, Hook: ph}
+}
+
+// isStale mirrors cli.staleCards: a live (confirmed) card that was never
+// injected in the retention window and shows no decayed pull activity. Kept in
+// sync by hand — both encode the same "dormant card" definition.
+func isStale(status string, injected bool, cs store.CardStats) bool {
+	if status == "candidate" || status == "retired" {
+		return false
+	}
+	if injected {
+		return false
+	}
+	return cs.Expanded+cs.Referenced <= 0.1
 }
 
 func normStatus(s string) string {

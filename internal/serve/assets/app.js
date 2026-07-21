@@ -62,6 +62,8 @@ const state = {
   kbEditing: false,
   typeFilter: {},
   statusFilter: {},
+  staleFilter: false, // KB "Stale" facet — show only never-pulled cards
+  returnTo: null,     // screen to offer a "← back" link to after an Overview drill-down
   actTab: 'inj',
   injOpen: {}, // keyed "si:ei" — which injection events are expanded
   toast: null,
@@ -165,13 +167,23 @@ function renderHeader() {
   const [title, sub] = TITLES[state.screen];
   document.getElementById('screen-title').textContent = title;
   document.getElementById('screen-sub').textContent = typeof sub === 'function' ? sub() : sub;
+  const back = document.getElementById('screen-back');
+  if (back) {
+    const show = !!state.returnTo && state.returnTo !== state.screen;
+    back.hidden = !show;
+    if (show) back.textContent = '← ' + ((TITLES[state.returnTo] || ['Back'])[0]);
+  }
 }
 
 // ---------- overview ----------
 function screenOverview() {
   const o = state.overview || SEED.overview;
-  const trend = o.trend.map(h => `<div class="b" style="height:${h}%"></div>`).join('');
-  const tiles = o.tiles.map(t =>
+  // Go marshals empty slices as JSON null (not []), so any of these can arrive
+  // null from /api/overview. Guard every .map — one throw here aborts
+  // renderScreen() *after* renderHeader() ran, leaving the previous screen's
+  // body under the new title.
+  const trend = (o.trend || []).map(h => `<div class="b" style="height:${h}%"></div>`).join('');
+  const tiles = (o.tiles || []).map(t =>
     `<div class="tile"><div class="tile-label">${esc(t.label)}</div>
       <div class="tile-val" style="color:${t.color}">${esc(t.value)}</div>
       <div class="tile-sub">${esc(t.sub)}</div></div>`).join('');
@@ -184,14 +196,21 @@ function screenOverview() {
       <div class="failed-btns"><button class="btn btn-red" data-act="retry">Retry</button>
         <button class="btn btn-outline" data-act="viewlog">View log</button></div>
     </div>` : '';
-  const noisy = o.noisy.map(c =>
-    `<div class="attn-row"><span class="attn-name">${esc(c.name)}</span>
+  const noisy = (o.noisy || []).map(c => {
+    const nm = c.short
+      ? `<span class="attn-name link" data-act="ovCard:${esc(c.short)}" role="button" tabindex="0" title="Open ${esc(c.name)} in the Knowledge Base">${esc(c.name)}</span>`
+      : `<span class="attn-name">${esc(c.name)}</span>`;
+    return `<div class="attn-row">${nm}
       <span class="score-pill">${esc(c.score)}</span>
       <button class="btn btn-outline" data-act="down:${esc(c.id || '')}">Down</button>
-      ${destrBtn('reject-noisy:' + (c.id || ''), 'Reject', 'btn btn-red-outline')}</div>`).join('');
-  const stale = o.stale.map(c =>
-    `<div class="attn-row"><span class="attn-name" style="color:var(--muted)">${esc(c.name)}</span>
-      <span class="attn-last">last ${esc(c.last)}</span></div>`).join('');
+      ${destrBtn('reject-noisy:' + (c.id || ''), 'Reject', 'btn btn-red-outline')}</div>`;
+  }).join('');
+  const stale = (o.stale || []).map(c => {
+    const link = c.short ? `data-act="ovCard:${esc(c.short)}" role="button" tabindex="0" title="Open ${esc(c.name)} in the Knowledge Base"` : '';
+    return `<div class="attn-row ${c.short ? 'link' : ''}" ${link}>
+      <span class="attn-name" style="color:var(--muted)">${esc(c.name)}</span>
+      <span class="attn-last">last ${esc(c.last)}</span></div>`;
+  }).join('');
   return `<div class="ov">
     <div class="ov-row">
       <div class="hero">
@@ -223,9 +242,9 @@ function screenOverview() {
         ${noisy}
       </div>
       <div class="card attn">
-        <div class="attn-head"><div class="attn-title">Stale cards</div><a data-act="nav:kb">${esc(o.staleHeader || '12 never pulled (30d)')} →</a></div>
+        <div class="attn-head"><div class="attn-title">Stale cards</div><a data-act="ovStale">${esc(o.staleHeader || '12 never pulled (30d)')} →</a></div>
         ${stale}
-        <div class="attn-more">${esc(o.staleMore || '+ 9 more')} →</div>
+        <div class="attn-more link" data-act="ovStale">${esc(o.staleMore || '+ 9 more')} →</div>
       </div>
     </div>
   </div>`;
@@ -320,6 +339,7 @@ function kbFiltered() {
   const anyStatus = Object.values(state.statusFilter).some(Boolean);
   const q = (state.kbSearch || '').trim().toLowerCase();
   return cards.filter(c => {
+    if (state.staleFilter && !c.stale) return false;
     if (anyType && !state.typeFilter[c.type]) return false;
     if (anyStatus && !state.statusFilter[c.status]) return false;
     if (!q) return true;
@@ -375,6 +395,12 @@ function screenKb() {
       <span class="dot statusdot-${t}"></span><span class="tfacet-label">${t}</span><span class="tfacet-count">${sCount[t] || 0}</span></button>`;
   }).join('');
 
+  const staleCount = cards.filter(c => c.stale).length;
+  const staleColor = '#5fe0d3';
+  const staleStyle = state.staleFilter ? `background:${alpha(staleColor, 0.14)};border-color:${alpha(staleColor, 0.45)};color:${staleColor};` : '';
+  const staleFacet = `<button class="tfacet ${state.staleFilter ? 'on' : ''}" style="${staleStyle}" data-act="facetStale">
+    <span class="dot" style="background:${staleColor}"></span><span class="tfacet-label">stale</span><span class="tfacet-count">${staleCount}</span></button>`;
+
   const st = state.status || {};
   const foot = st.ollamaOffline
     ? `<div class="kb-foot"><span class="dot"></span> keyword-only — <b>ollama offline, semantic search degraded</b></div>`
@@ -392,6 +418,8 @@ function screenKb() {
         <div class="kb-facets">${typeFacets}</div>
         <div class="facet-group-label">Status</div>
         <div class="kb-facets status">${statusFacets}</div>
+        <div class="facet-group-label">Freshness</div>
+        <div class="kb-facets">${staleFacet}</div>
       </div>
       <div class="kb-rows">${kbRowsHtml(filtered)}</div>
       ${foot}
@@ -718,7 +746,22 @@ function handleAction(act) {
     clearConfirm();
   }
   switch (name) {
-    case 'nav': goto(arg); return;
+    case 'nav': state.returnTo = null; goto(arg); return;
+    // In-app back: if a browser-history drill entry exists, pop it (unifies with
+    // the physical Back button via popstate); otherwise run the back directly.
+    case 'back':
+      if (history.state && history.state.culiBack) { history.back(); return; }
+      doBack();
+      return;
+    case 'ovCard': drillTo('overview'); gotoCard(arg); return;
+    case 'ovStale':
+      drillTo('overview');
+      state.staleFilter = true;
+      state.typeFilter = {}; state.statusFilter = {};
+      state.kbId = null;
+      goto('kb');
+      return;
+    case 'facetStale': state.staleFilter = !state.staleFilter; state.kbId = null; renderScreen(); return;
     case 'selCand': selectCandidate(+arg); return;
     case 'approve': approve(); return;
     case 'reject': reject(); return;
@@ -739,7 +782,7 @@ function handleAction(act) {
       if (sc2) sc2.scrollTop = top;
       return;
     }
-    case 'injCard': gotoCard(arg); return;
+    case 'injCard': drillTo('activity'); gotoCard(arg); return;
     case 'undo': undo(); return;
     case 'cardDown': cardAction('down', state.kbId, 'Downvoted', '#8a8a93'); return;
     case 'cardRetire': cardAction('retire', state.kbId, 'Retired (reversible)', '#e6ac5c'); return;
@@ -878,6 +921,19 @@ function selectCandidate(i) {
   const list2 = document.querySelector('.queue-list');
   if (list2) list2.scrollTop = top;
 }
+// drillTo marks which screen a KB deep-link should offer a "← back" link to,
+// and pushes a browser-history entry so the physical Back button returns there
+// too. Both the in-app link and the Back button funnel through doBack.
+function drillTo(from) {
+  state.returnTo = from;
+  try { history.pushState({ culiBack: true }, ''); } catch (_) { /* file:// / blocked — link still works */ }
+}
+function doBack() {
+  const r = state.returnTo || 'overview';
+  state.returnTo = null;
+  state.staleFilter = false;
+  goto(r);
+}
 // gotoCard jumps from an injection breakdown to the card's KB detail: switch to
 // the Knowledge Base, load the card, and select it. Clears any active facet
 // filters so the target card is never hidden by a stale filter.
@@ -885,6 +941,7 @@ async function gotoCard(short) {
   state.screen = 'kb';
   state.typeFilter = {};
   state.statusFilter = {};
+  state.staleFilter = false;
   state.kbEditing = false;
   await ensure('kb');
   state.kbId = short;
@@ -967,6 +1024,9 @@ function boot() {
   });
   document.getElementById('toast-undo').addEventListener('click', undo);
   window.addEventListener('keydown', onKey);
+  // Physical browser Back button: if we're inside a drill-down, return to where
+  // it came from — same path as the in-app "← back" link.
+  window.addEventListener('popstate', () => { if (state.returnTo) doBack(); });
   goto(state.screen);
 }
 
