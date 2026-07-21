@@ -8,6 +8,8 @@
 
 **culi** (cà phê culi — the single dense peaberry bean) keeps all your Claude Code context — rules, skills, lessons, styles, patterns — as small markdown "cards" in one place. On every prompt it pushes just the most relevant, token-budgeted slice into Claude via hooks, lets Claude pull more on demand via an MCP server, and quietly **learns** new lessons from your sessions.
 
+In short: **self-improving agent memory and context engineering for Claude Code** — the harness layer that decides what Claude should know at each step, so you stop re-teaching it and stop paying for context it doesn't need.
+
 No Node, no Python, no daemon required. One static Go binary.
 
 ---
