@@ -34,16 +34,20 @@ If you use Claude Code across more than one repo, you probably have this problem
 
 ## Screenshots
 
-<!-- Add your images to a docs/ folder and they'll render below.
-     Suggested: run `culi serve` and screenshot each screen. -->
+The `culi serve` review console — a health overview with real token-savings, a review queue for
+mined candidates, a searchable knowledge base, a per-conversation injection log, and editable settings.
 
-| Overview | Review queue |
+| Overview — token savings & card health | Review — approve/reject mined candidates |
 |---|---|
 | ![Overview](docs/overview.png) | ![Review](docs/review.png) |
 
-| Knowledge base | Activity — what culi injected, per conversation |
+| Knowledge base — searchable card store | Activity — exactly which cards Claude saw, per conversation |
 |---|---|
 | ![Knowledge base](docs/knowledge-base.png) | ![Activity](docs/activity.png) |
+
+| Settings — safe knobs, written straight to `config.yaml` | |
+|---|---|
+| ![Settings](docs/settings.png) | |
 
 ---
 
