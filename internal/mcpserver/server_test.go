@@ -145,3 +145,59 @@ func TestSearchExpandSaveFlow(t *testing.T) {
 		t.Fatalf("invalid scope should be a tool error (err=%v res=%+v)", err, res)
 	}
 }
+
+// TestSaveLessonMergesNearDuplicate proves the smart-dedup path: a second
+// save_lesson about the same thing (same scope, near-identical title+summary)
+// folds into the existing card instead of creating a duplicate. No Ollama in
+// tests, so this exercises the lexical-Jaccard fallback.
+func TestSaveLessonMergesNearDuplicate(t *testing.T) {
+	sess, base := startSession(t)
+	kdir := config.KnowledgeDir(base)
+
+	var first saveOut
+	call(t, sess, "save_lesson", map[string]any{
+		"title":    "Connect to tagby AWS",
+		"summary":  "bastion aws ssm start-session profile tagby-prod",
+		"markdown": "Use the bastion host, then aws ssm start-session with profile tagby-prod.",
+		"scope":    "repo:tagby-backend",
+	}, &first)
+	if first.Merged {
+		t.Fatalf("first save should create, not merge: %+v", first)
+	}
+
+	var second saveOut
+	call(t, sess, "save_lesson", map[string]any{
+		"title":    "Connect to tagby AWS",
+		"summary":  "bastion aws ssm start-session profile tagby-prod vpn",
+		"markdown": "You also need the corp VPN up before the bastion is reachable.",
+		"scope":    "repo:tagby-backend",
+	}, &second)
+	if !second.Merged {
+		t.Fatalf("near-duplicate save should merge, not duplicate: %+v", second)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("merge target = %s, want existing %s", second.ID, first.ID)
+	}
+
+	// Exactly one lesson file, holding both the original and the appended knowledge.
+	files, _ := filepath.Glob(filepath.Join(kdir, "lessons", "*", "*.md"))
+	if len(files) != 1 {
+		t.Fatalf("lesson files = %d, want 1 (no duplicate): %v", len(files), files)
+	}
+	body, _ := os.ReadFile(files[0])
+	if !strings.Contains(string(body), "VPN") || !strings.Contains(string(body), "**Update ") {
+		t.Fatalf("appended knowledge / update marker missing:\n%s", body)
+	}
+
+	// A different-scope save with the same title must NOT merge (scopes are isolated).
+	var other saveOut
+	call(t, sess, "save_lesson", map[string]any{
+		"title":    "Connect to tagby AWS",
+		"summary":  "bastion aws ssm start-session profile tagby-prod",
+		"markdown": "Global note.",
+		"scope":    "global",
+	}, &other)
+	if other.Merged {
+		t.Fatalf("cross-scope save must not merge: %+v", other)
+	}
+}

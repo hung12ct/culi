@@ -73,7 +73,10 @@ func (s *Server) MCP() *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "save_lesson",
 		Description: "Save a durable lesson card to the user's knowledge store. Use when the " +
-			"user asks to remember a correction, decision, or hard-won fact for future sessions.",
+			"user asks to remember a correction, decision, or hard-won fact for future sessions. " +
+			"If culi already holds a closely-related lesson it will fold the new knowledge into " +
+			"that card instead of duplicating — check the returned `merged`/`note` fields and tell " +
+			"the user whether a new card was created or an existing one updated.",
 	}, s.saveLesson)
 	return srv
 }
