@@ -59,6 +59,11 @@ type LearnConfig struct {
 	// value disables the janitor. Confirmed cards are NEVER auto-retired —
 	// dormant ones are only reported by `culi stats` (C4).
 	CandidateTTLDays int `yaml:"candidate_ttl_days"`
+	// MaxJobsPerRun caps how many queued transcripts one `culi learn` run mines,
+	// newest first (recent conversations carry the most relevant lessons). 0 =
+	// default (50); a negative value = unlimited. `culi learn --no-cap` always
+	// drains the whole backlog regardless of this.
+	MaxJobsPerRun int `yaml:"max_jobs_per_run"`
 	// OAuthTokenFile points the claude-cli backend at a file holding a
 	// CLAUDE_CODE_OAUTH_TOKEN. Empty (default) = off. Set it when background
 	// learning runs headless: Claude Code does not propagate its OAuth token to
@@ -103,6 +108,7 @@ const (
 	defaultDailyUSDCap    = 0.50
 	defaultDailyCallCap   = 40
 	defaultCandidateTTL   = 30 // days a candidate may sit unreinforced
+	defaultMaxJobsPerRun  = 50 // newest transcripts mined per `culi learn` run
 )
 
 // BaseDir returns the culi home directory: $CULI_HOME if set, else ~/.culi.
@@ -144,7 +150,7 @@ func Load(base string) (Config, error) {
 			Enabled: true, Provider: "auto",
 			CheapModel: defaultCheapModel, StrongModel: defaultStrongModel,
 			DailyUSDCap: defaultDailyUSDCap, DailyCallCap: defaultDailyCallCap,
-			CandidateTTLDays: defaultCandidateTTL,
+			CandidateTTLDays: defaultCandidateTTL, MaxJobsPerRun: defaultMaxJobsPerRun,
 		},
 	}
 	raw, err := os.ReadFile(filepath.Join(base, "config.yaml"))
@@ -194,6 +200,10 @@ func Load(base string) (Config, error) {
 	// "disable the janitor" signal and must survive.
 	if cfg.Learn.CandidateTTLDays == 0 {
 		cfg.Learn.CandidateTTLDays = defaultCandidateTTL
+	}
+	// Zero defaults to 50; a negative value means "no per-run limit".
+	if cfg.Learn.MaxJobsPerRun == 0 {
+		cfg.Learn.MaxJobsPerRun = defaultMaxJobsPerRun
 	}
 	return cfg, nil
 }

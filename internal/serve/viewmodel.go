@@ -560,6 +560,7 @@ func (s *server) buildSettings() settingsPayload {
 		{Title: "Caps & spend", Items: []setItem{
 			{Key: "daily_usd_cap", Desc: "hard stop on learn spend", Value: fmt.Sprintf("%.2f", c.Learn.DailyUSDCap), Width: "80px"},
 			{Key: "daily_call_cap", Desc: "model calls per day", Value: itoa(c.Learn.DailyCallCap), Width: "70px"},
+			{Key: "max_jobs_per_run", Desc: "transcripts mined per run, newest first (−1 = no limit)", Value: itoa(c.Learn.MaxJobsPerRun), Width: "70px"},
 		}},
 		{Title: "Learning backend", Items: []setItem{
 			{Key: "provider", Desc: "auto · anthropic · claude-cli · ollama · none", Value: c.Learn.Provider, Width: "120px"},

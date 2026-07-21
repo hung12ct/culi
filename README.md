@@ -174,6 +174,7 @@ learn:
   strong_model: claude-sonnet-5
   daily_usd_cap: 0.50         # anthropic backend only
   daily_call_cap: 40          # all backends
+  max_jobs_per_run: 50        # transcripts mined per run, newest first; -1 = no limit
   candidate_ttl_days: 30      # auto-retire unreviewed candidates; -1 disables
   oauth_token_file: ""        # headless subscription auth (see above)
   anthropic_api_key_file: ""  # headless API auth (see above)

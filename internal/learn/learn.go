@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
@@ -30,6 +31,11 @@ import (
 // embedBudget bounds the post-run vector pass for freshly written cards —
 // best-effort, like every Ollama touch.
 const embedBudget = 5 * time.Second
+
+// parallelDrainWorkers bounds concurrent MineSession calls in a --no-cap drain.
+// Small on purpose: the LLM calls overlap, but the store writes serialize on a
+// single WAL writer, so more workers buy little and just add subprocess load.
+const parallelDrainWorkers = 4
 
 // Summary reports one worker run.
 type Summary struct {
@@ -90,6 +96,11 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		cfg.Learn.DailyUSDCap = 0
 		cfg.Learn.DailyCallCap = 0
 		sum.Notes = append(sum.Notes, "caps ignored (--no-cap): draining the full backlog")
+	} else if lim := cfg.Learn.MaxJobsPerRun; lim > 0 && len(jobs) > lim {
+		// Mine only the newest N this run (jobs are newest-first); the rest wait
+		// for the next run or a --no-cap drain.
+		sum.Notes = append(sum.Notes, fmt.Sprintf("this run: %d newest of %d queued (learn.max_jobs_per_run; --no-cap for all)", lim, len(jobs)))
+		jobs = jobs[:lim]
 	}
 
 	tier, desc, err := llmtier.Resolve(cfg.Learn, cfg.Ollama.Endpoint, stateDir)
@@ -119,12 +130,14 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 	now := time.Now().UTC()
 	fromStart := opts.FromStart
 
-	for _, job := range jobs {
+	// prep filters a job to a mineable (cursor, ok); ok=false means nothing new
+	// (already marked Done). Runs in the main goroutine only.
+	prep := func(job queue.Job) (queue.Cursor, bool) {
 		st, err := os.Stat(job.TranscriptPath)
 		if err != nil {
 			sum.Notes = append(sum.Notes, fmt.Sprintf("transcript gone: %s", job.TranscriptPath))
 			_ = queue.Done(job)
-			continue
+			return queue.Cursor{}, false
 		}
 		cur := cursors.Get(job.TranscriptPath)
 		if fromStart {
@@ -132,22 +145,28 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		}
 		if !queue.ShouldMine(cur, st.Size(), true, now) {
 			_ = queue.Done(job) // nothing new since the last mine
-			continue
+			return queue.Cursor{}, false
 		}
+		return cur, true
+	}
 
-		res, newCur, err := miner.MineSession(ctx, job, cur)
+	// collect folds one finished mine into the summary and advances the cursor +
+	// queue. Always runs in the main goroutine, so sum/cursors need no locks.
+	// stop=true halts the run (caps/backend) leaving remaining jobs queued.
+	collect := func(job queue.Job, res mine.Result, newCur queue.Cursor, err error) (stop bool) {
 		sum.Usage.Add(res.Usage)
-		if errors.Is(err, llmtier.ErrCapped) {
+		switch {
+		case errors.Is(err, llmtier.ErrCapped):
 			sum.Capped = true
 			sum.Notes = append(sum.Notes, firstNoteLine(err))
-			break // keep this job and the rest queued
-		}
-		if errors.Is(err, llmtier.ErrBackendUnavailable) {
+			return true
+		case errors.Is(err, llmtier.ErrBackendUnavailable):
 			sum.BackendDown = true
 			sum.Notes = append(sum.Notes, firstNoteLine(err))
-			break // env problem, not a bad transcript — keep this job and the rest queued
-		}
-		if err != nil {
+			return true
+		case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+			return false // run halted/timed out — leave the job queued, don't park
+		case err != nil:
 			parked, ferr := queue.Fail(job)
 			note := fmt.Sprintf("job %s failed: %v", job.SessionID, err)
 			if parked {
@@ -157,9 +176,8 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 				note += " (" + ferr.Error() + ")"
 			}
 			sum.Notes = append(sum.Notes, note)
-			continue
+			return false
 		}
-
 		// Parse-gated deletion: only after the result landed do cursor + job
 		// advance, in that order — a crash between the two re-mines (dedup
 		// absorbs it) rather than losing a region.
@@ -168,7 +186,6 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 			sum.Notes = append(sum.Notes, err.Error())
 		}
 		_ = queue.Done(job)
-
 		if res.Windows == 0 {
 			sum.Clean++
 		} else {
@@ -180,6 +197,68 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		sum.Retired = append(sum.Retired, res.Retired...)
 		sum.StyleObs += res.StyleObs
 		sum.Notes = append(sum.Notes, res.Notes...)
+		return false
+	}
+
+	if opts.IgnoreCaps && len(jobs) > 1 {
+		// --no-cap parallel drain: fan out the LLM-heavy MineSession across a
+		// bounded pool, funnel the single-writer store writes through a shared
+		// WriteMu, and collect bookkeeping back here. Only worthwhile in bulk.
+		// Each worker gets its OWN Miner — MineSession keeps a per-session vec
+		// cache on the Miner, so sharing one would race; Store/Tier/Emb/WriteMu
+		// are concurrency-safe and shared.
+		writeMu := &sync.Mutex{}
+		newMiner := func() *mine.Miner {
+			return &mine.Miner{Base: base, Store: s, Tier: tier, Emb: e, EmbModel: cfg.Ollama.Model, Logf: logf, WriteMu: writeMu}
+		}
+		type task struct {
+			job queue.Job
+			cur queue.Cursor
+		}
+		var tasks []task
+		for _, job := range jobs {
+			if cur, ok := prep(job); ok {
+				tasks = append(tasks, task{job, cur})
+			}
+		}
+		type outcome struct {
+			job    queue.Job
+			res    mine.Result
+			newCur queue.Cursor
+			err    error
+		}
+		runCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		sem := make(chan struct{}, parallelDrainWorkers)
+		out := make(chan outcome, len(tasks))
+		var wg sync.WaitGroup
+		for _, t := range tasks {
+			wg.Add(1)
+			sem <- struct{}{} // bound to parallelDrainWorkers in flight
+			go func(t task) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				res, newCur, err := newMiner().MineSession(runCtx, t.job, t.cur)
+				out <- outcome{t.job, res, newCur, err}
+			}(t)
+		}
+		go func() { wg.Wait(); close(out) }()
+		for o := range out {
+			if collect(o.job, o.res, o.newCur, o.err) {
+				cancel() // halt: in-flight workers cancel and leave their jobs queued
+			}
+		}
+	} else {
+		for _, job := range jobs {
+			cur, ok := prep(job)
+			if !ok {
+				continue
+			}
+			res, newCur, err := miner.MineSession(ctx, job, cur)
+			if collect(job, res, newCur, err) {
+				break
+			}
+		}
 	}
 
 	// Pipeline B: policy-gated style synthesis over the observations ledger.

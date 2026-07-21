@@ -36,6 +36,7 @@ var knobs = map[string]knobSpec{
 	"candidate_ttl_days":     {[]string{"learn", "candidate_ttl_days"}, kindInt},
 	"daily_usd_cap":          {[]string{"learn", "daily_usd_cap"}, kindFloat},
 	"daily_call_cap":         {[]string{"learn", "daily_call_cap"}, kindInt},
+	"max_jobs_per_run":       {[]string{"learn", "max_jobs_per_run"}, kindInt},
 	"provider":               {[]string{"learn", "provider"}, kindString},
 	"oauth_token_file":       {[]string{"learn", "oauth_token_file"}, kindString},
 	"anthropic_api_key_file": {[]string{"learn", "anthropic_api_key_file"}, kindString},

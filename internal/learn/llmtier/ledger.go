@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hung12ct/culi/internal/llmgen"
@@ -43,8 +44,11 @@ type DaySpend struct {
 	USD        float64 `json:"usd"`
 }
 
-// Ledger is the persistent daily spend record (state/spend.json).
+// Ledger is the persistent daily spend record (state/spend.json). Its methods
+// are safe for concurrent use so a --no-cap parallel drain can record spend
+// from several mining goroutines at once.
 type Ledger struct {
+	mu   sync.Mutex
 	path string
 	Days map[string]DaySpend `json:"days"`
 }
@@ -67,6 +71,8 @@ func LoadLedger(stateDir string) *Ledger {
 // Allow returns ErrCapped (wrapped with the reason) when today's bucket is at
 // either cap. Caps ≤ 0 mean "no cap of that kind".
 func (l *Ledger) Allow(now time.Time, usdCap float64, callCap int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	d := l.Days[day(now)]
 	if callCap > 0 && d.Calls >= callCap {
 		return fmt.Errorf("%w: %d calls today (learn.daily_call_cap %d)", ErrCapped, d.Calls, callCap)
@@ -79,6 +85,8 @@ func (l *Ledger) Allow(now time.Time, usdCap float64, callCap int) error {
 
 // Record folds one call into today's bucket (in memory; Save persists).
 func (l *Ledger) Record(now time.Time, usage llmgen.Usage, usd float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	k := day(now)
 	d := l.Days[k]
 	d.Calls++
@@ -88,8 +96,13 @@ func (l *Ledger) Record(now time.Time, usage llmgen.Usage, usd float64) {
 	l.Days[k] = d
 }
 
-// Save writes the ledger atomically, pruning buckets past retention.
+// Save writes the ledger atomically, pruning buckets past retention. The lock
+// is held across the (small, local) file write so concurrent Saves can't
+// interleave temp-file writes or lose an update; the slow LLM call in
+// Tier.Generate happens outside any ledger lock.
 func (l *Ledger) Save() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	cutoff := day(time.Now().UTC().AddDate(0, 0, -ledgerRetentionDays))
 	for k := range l.Days {
 		if k < cutoff {
