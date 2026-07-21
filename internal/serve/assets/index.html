@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>culi · Review Console</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="app">
+
+    <!-- STATUS STRIP -->
+    <div class="strip" id="strip">
+      <div class="strip-serve mono">
+        <span class="dot dot-serve" id="serve-dot"></span>
+        <span class="strip-serve-name">culi</span> serve
+      </div>
+      <span class="strip-sep">·</span>
+      <span><b id="s-cards">—</b> cards</span>
+      <span class="strip-sep">·</span>
+      <span>saved <b class="teal" id="s-saved">—</b> <span class="faint">(7d)</span></span>
+      <span class="strip-sep">·</span>
+      <span><b class="amber" id="s-review">—</b> to review</span>
+      <button class="strip-failed" id="s-failed" hidden><span>⚠</span> <span id="s-failed-label"></span></button>
+      <div class="spacer"></div>
+      <span class="mono faint strip-addr" id="s-addr">localhost:7378</span>
+    </div>
+
+    <div class="body">
+
+      <!-- LEFT NAV -->
+      <nav class="nav">
+        <div class="brand">
+          <div class="brand-glyph">c</div>
+          <div>
+            <div class="brand-title">Review Console</div>
+            <div class="brand-sub mono">knowledge store</div>
+          </div>
+        </div>
+        <div class="nav-items" id="nav-items"></div>
+        <div class="spacer"></div>
+        <div class="spend">
+          <div class="spend-head"><span>spend today</span><span class="mono" id="spend-amt">—</span></div>
+          <div class="bar"><div class="bar-fill" id="spend-fill" style="width:0%"></div></div>
+          <div class="spend-cap" id="spend-cap"></div>
+        </div>
+      </nav>
+
+      <!-- MAIN -->
+      <main class="main">
+        <header class="header">
+          <h1 class="header-title" id="screen-title"></h1>
+          <span class="header-sub" id="screen-sub"></span>
+          <div class="spacer"></div>
+          <div class="header-actions">
+            <button class="hbtn" data-act="refresh" title="Refresh data" aria-label="Refresh">↻</button>
+            <button class="hbtn" data-act="shortcuts" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+          </div>
+        </header>
+        <div class="screen" id="screen"></div>
+      </main>
+    </div>
+
+    <!-- MODAL ROOT (repos manager, etc.) -->
+    <div id="modal-root"></div>
+
+    <!-- SHORTCUTS POPOVER -->
+    <div class="shortcuts" id="shortcuts" hidden>
+      <div class="shortcuts-title">Keyboard shortcuts</div>
+      <div class="shortcuts-group">Review queue</div>
+      <div class="shortcuts-row"><span><b class="mono">a</b> approve</span><span><b class="mono">r</b> reject</span></div>
+      <div class="shortcuts-row"><span><b class="mono">s</b> skip</span><span><b class="mono">e</b> edit</span></div>
+      <div class="shortcuts-row"><span><b class="mono">j</b> / <b class="mono">k</b> move</span><span><b class="mono">⌘Z</b> undo</span></div>
+      <div class="shortcuts-group">Anywhere</div>
+      <div class="shortcuts-row"><span><b class="mono">?</b> this panel</span><span><b class="mono">Esc</b> close</span></div>
+    </div>
+
+    <!-- TOAST -->
+    <div class="toast" id="toast" hidden>
+      <span class="dot" id="toast-dot"></span>
+      <span id="toast-msg"></span>
+      <button class="toast-undo" id="toast-undo">Undo</button>
+      <span class="mono keycap">⌘Z</span>
+    </div>
+  </div>
+
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
