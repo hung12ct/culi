@@ -16,11 +16,17 @@ help:
 
 # ── build ─────────────────────────────────────────────────────────────────────
 
-build: ## compile all packages
-	go build ./...
+# Version stamped into the binary (shown by `culi version`), from git tags:
+# a clean tag → v0.1.0; commits past a tag → v0.1.0-3-gabc123; +dirty when the
+# working tree has uncommitted changes; "dev" before any tag exists.
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS := -X github.com/hung12ct/culi/internal/cli.version=$(VERSION)
 
-install: ## install the culi binary to GOBIN
-	go install ./cmd/culi
+build: ## compile all packages
+	go build -ldflags "$(LDFLAGS)" ./...
+
+install: ## install the version-stamped culi binary to GOBIN
+	go install -ldflags "$(LDFLAGS)" ./cmd/culi
 
 # ── code quality ──────────────────────────────────────────────────────────────
 
