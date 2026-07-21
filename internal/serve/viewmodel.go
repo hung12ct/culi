@@ -165,6 +165,14 @@ type sessionPayload struct {
 	Events   []sessionEvent `json:"events"`
 }
 
+// injectionsPayload wraps the Activity injections list with the distinct repo
+// labels present in the recent window, so the client can render a repo filter
+// whose options stay stable regardless of the active filter.
+type injectionsPayload struct {
+	Repos    []string         `json:"repos"`
+	Sessions []sessionPayload `json:"sessions"`
+}
+
 type runPayload struct {
 	Date       string `json:"date"`
 	Mined      string `json:"mined"`
@@ -458,7 +466,12 @@ func (s *server) buildCardDetail(ctx context.Context, id string) (cardDetailPayl
 	}, true
 }
 
-func (s *server) buildSessions(ctx context.Context) []sessionPayload {
+// buildSessions returns recent injection sessions for the Activity view,
+// optionally filtered by repo label and a since-cutoff (zero = no time limit).
+// Repos is the full distinct repo list across the recent window — computed
+// before filtering so the client's dropdown stays stable. All local and off the
+// hook hot path: a scan of ≤500 in-memory rows, no extra query.
+func (s *server) buildSessions(ctx context.Context, repoFilter string, since time.Time) injectionsPayload {
 	rows, _ := s.store.RecentInjections(ctx, 500)
 	// Map full card id → short id so each injected card can deep-link into the KB.
 	metas, _ := s.store.AllCardsMeta(ctx)
@@ -466,9 +479,35 @@ func (s *server) buildSessions(ctx context.Context) []sessionPayload {
 	for _, m := range metas {
 		idToShort[m.ID] = m.ShortID
 	}
+	// Distinct repos across the whole recent window (dropdown options), and the
+	// row filter, in one pass. "all"/"" repoFilter means no repo constraint.
+	repoSet := map[string]struct{}{}
+	wantRepo := repoFilter != "" && repoFilter != "all"
+	kept := make([]store.InjectionRow, 0, len(rows))
+	for _, r := range rows {
+		lbl := repoLabel(r.Cwd)
+		if lbl != "" {
+			repoSet[lbl] = struct{}{}
+		}
+		if wantRepo && lbl != repoFilter {
+			continue
+		}
+		if !since.IsZero() {
+			if t, ok := parseTS(r.TS); !ok || t.Before(since) {
+				continue
+			}
+		}
+		kept = append(kept, r)
+	}
+	repos := make([]string, 0, len(repoSet))
+	for r := range repoSet {
+		repos = append(repos, r)
+	}
+	sort.Strings(repos)
+
 	var order []string
 	groups := map[string][]store.InjectionRow{}
-	for _, r := range rows {
+	for _, r := range kept {
 		if _, ok := groups[r.SessionID]; !ok {
 			order = append(order, r.SessionID)
 		}
@@ -519,7 +558,7 @@ func (s *server) buildSessions(ctx context.Context) []sessionPayload {
 			Events:   events,
 		})
 	}
-	return out
+	return injectionsPayload{Repos: repos, Sessions: out}
 }
 
 func (s *server) buildRuns() []runPayload {

@@ -65,6 +65,9 @@ const state = {
   staleFilter: false, // KB "Stale" facet — show only never-pulled cards
   returnTo: null,     // screen to offer a "← back" link to after an Overview drill-down
   actTab: 'inj',
+  actRepo: '',        // Activity: repo filter ('' = all repos)
+  actSince: 'all',    // Activity: date filter (all | today | 7d | 30d)
+  actRepos: [],       // repo labels seen in the recent window (filter dropdown options)
   injOpen: {}, // keyed "si:ei" — which injection events are expanded
   toast: null,
   undoStack: null,
@@ -89,7 +92,14 @@ async function loadOverview()  { try { return await api('/api/overview'); }  cat
 async function loadCandidates(){ try { return await api('/api/candidates'); }catch { return SEED.candidates; } }
 async function loadCards()     { try { return await api('/api/cards'); }     catch { return SEED.cards; } }
 async function loadCard(id)    { try { return await api('/api/cards/' + encodeURIComponent(id)); } catch { return (SEED.cards.find(c => c.id === id) || null); } }
-async function loadSessions()  { try { return await api('/api/activity/injections'); } catch { return SEED.sessions; } }
+async function loadSessions()  {
+  const q = new URLSearchParams();
+  if (state.actRepo) q.set('repo', state.actRepo);
+  if (state.actSince && state.actSince !== 'all') q.set('since', state.actSince);
+  const qs = q.toString();
+  try { return await api('/api/activity/injections' + (qs ? '?' + qs : '')); }
+  catch { return { sessions: SEED.sessions, repos: [] }; }
+}
 async function loadRuns()      { try { return await api('/api/activity/runs'); } catch { return SEED.runs; } }
 async function loadSettings()  { try { return await api('/api/config'); }     catch { return SEED.settings; } }
 
@@ -530,6 +540,19 @@ function injCardRow(c) {
     ${tail}
   </div>`;
 }
+function activityFilters() {
+  const repoOpts = ['<option value="">All repos</option>'].concat(
+    (state.actRepos || []).map(r => `<option value="${esc(r)}"${state.actRepo === r ? ' selected' : ''}>${esc(r)}</option>`)
+  ).join('');
+  const dates = [['all', 'All'], ['today', 'Today'], ['7d', '7d'], ['30d', '30d']];
+  const dateSeg = dates.map(([v, l]) =>
+    `<button class="seg ${state.actSince === v ? 'active' : ''}" data-act="actSince:${v}">${esc(l)}</button>`).join('');
+  return `<div class="act-filters">
+    <select class="act-sel mono" data-change="actRepo" title="Filter by repository">${repoOpts}</select>
+    <div class="segmented sm" title="Filter by time">${dateSeg}</div>
+  </div>`;
+}
+
 function screenActivity() {
   const inj = state.actTab === 'inj';
   const seg = `<div class="act-top">
@@ -543,10 +566,11 @@ function screenActivity() {
       <span class="gran-pill gran-summary"><i></i>summary</span><span class="gran-key-note">~60 tok</span>
       <span class="gran-pill gran-hook"><i></i>hook</span><span class="gran-key-note">one-liner</span>
     </div>` : ''}
-  </div>`;
+  </div>${inj ? activityFilters() : ''}`;
 
   let body;
   if (inj) {
+    const filtering = !!state.actRepo || (state.actSince && state.actSince !== 'all');
     const sessions = (state.sessions || []).map((s, si) => {
       const nEvents = (s.events || []).length;
       const events = (s.events || []).map((e, ei) => {
@@ -577,9 +601,13 @@ function screenActivity() {
         <div class="sess-box">${events}<div class="sess-foot">↳ click any row to see exactly which cards Claude was shown</div></div>
       </div>`;
     }).join('');
-    body = sessions || `<div class="act-empty"><div class="act-empty-ic">◷</div>
-      <div class="act-empty-t">No injections logged yet</div>
-      <div class="act-empty-s">Work in a watched repo and culi's injections will show up here, grouped by conversation.</div></div>`;
+    body = sessions || (filtering
+      ? `<div class="act-empty"><div class="act-empty-ic">◷</div>
+        <div class="act-empty-t">No injections match this filter</div>
+        <div class="act-empty-s">Widen the repo or date range to see more recent activity.</div></div>`
+      : `<div class="act-empty"><div class="act-empty-ic">◷</div>
+        <div class="act-empty-t">No injections logged yet</div>
+        <div class="act-empty-s">Work in a watched repo and culi's injections will show up here, grouped by conversation.</div></div>`);
   } else {
     const runs = (state.runs || []).map(r =>
       `<div class="run ${r.failed ? 'failed' : ''}"><span class="dot" style="background:${r.dot}"></span>
@@ -629,7 +657,15 @@ async function ensure(screen) {
   if (screen === 'review' && !state.candidates) state.candidates = await loadCandidates();
   if (screen === 'kb' && !state.cards) state.cards = await loadCards();
   if (screen === 'activity') {
-    if (!state.sessions) { state.sessions = await loadSessions(); state.injOpen = {}; }
+    if (!state.sessions) {
+      const r = await loadSessions();
+      const obj = Array.isArray(r) ? { sessions: r, repos: [] } : (r || {});
+      state.sessions = obj.sessions || [];
+      // Keep the last non-empty repo list so the dropdown never blanks out when a
+      // filter narrows the result set (the server returns the full list anyway).
+      if (obj.repos && obj.repos.length) state.actRepos = obj.repos;
+      state.injOpen = {};
+    }
     if (!state.runs) state.runs = await loadRuns();
   }
   if (screen === 'settings' && !state.settings) state.settings = await loadSettings();
@@ -774,6 +810,7 @@ function handleAction(act) {
     case 'facetType': state.typeFilter[arg] = !state.typeFilter[arg]; state.kbId = null; renderScreen(); return;
     case 'facetStatus': state.statusFilter[arg] = !state.statusFilter[arg]; state.kbId = null; renderScreen(); return;
     case 'actTab': state.actTab = arg; renderScreen(); return;
+    case 'actSince': if (state.actSince !== arg) { state.actSince = arg; reloadSessions(); } return;
     case 'injToggle': {
       const sc = document.getElementById('screen');
       const top = sc ? sc.scrollTop : 0;
@@ -833,6 +870,20 @@ async function cardEditSave() {
   if (d) state.cardDetail[state.kbId] = d;
   await ensure('kb');
   render();
+}
+
+// reloadSessions re-fetches the Activity injections with the current repo/date
+// filters and re-renders. A local, off-hot-path request over ≤500 rows.
+async function reloadSessions() {
+  state.sessions = null;
+  await ensure('activity');
+  renderScreen();
+}
+
+// handleChange dispatches <select>/input change events (data-change attribute),
+// the counterpart to click-based data-act handling.
+function handleChange(name, value) {
+  if (name === 'actRepo') { state.actRepo = value; reloadSessions(); }
 }
 
 // refresh re-fetches the live data for the current screen (the dashboard is a
@@ -1028,6 +1079,10 @@ function boot() {
   });
   document.addEventListener('input', e => {
     if (e.target && e.target.id === 'kb-search') { state.kbSearch = e.target.value; updateKbList(); }
+  });
+  document.addEventListener('change', e => {
+    const el = e.target.closest('[data-change]');
+    if (el) handleChange(el.getAttribute('data-change'), el.value);
   });
   document.getElementById('toast-undo').addEventListener('click', undo);
   window.addEventListener('keydown', onKey);

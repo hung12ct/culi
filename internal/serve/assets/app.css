@@ -438,6 +438,13 @@ input:focus, textarea:focus { outline: none; }
 .seg:hover { color: var(--tx2); }
 .seg.active { background: var(--teal); color: var(--teal-ink); }
 
+/* Activity filters: repo dropdown + compact date presets */
+.act-filters { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.act-sel { background: var(--panel); border: 1px solid var(--hair); border-radius: 8px; color: var(--tx2); font-size: 12.5px; padding: 7px 10px; cursor: pointer; }
+.act-sel:hover { color: var(--tx1); }
+.segmented.sm { padding: 2px; }
+.segmented.sm .seg { padding: 5px 11px; font-size: 12px; }
+
 /* granularity legend + pills (shared color language with the Overview bar) */
 .gran-key { display: flex; align-items: center; gap: 7px; margin-left: auto; }
 .gran-key-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint2); margin-right: 2px; }
