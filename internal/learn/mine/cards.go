@@ -16,9 +16,19 @@ import (
 	"github.com/hung12ct/culi/internal/store"
 )
 
-// confirmAt is the observation count where a candidate becomes confirmed and
-// starts injecting (plan §learning lifecycle).
-const confirmAt = 2
+// defaultConfirmAt is the fallback observation count where a candidate becomes
+// confirmed and starts injecting (plan §learning lifecycle). Overridable per
+// install via learn.confirm_at → Miner.ConfirmAt.
+const defaultConfirmAt = 2
+
+// confirmThreshold is the effective observation count for confirmation: the
+// configured Miner.ConfirmAt, or the default when unset/invalid.
+func (m *Miner) confirmThreshold() int {
+	if m.ConfirmAt >= 1 {
+		return m.ConfirmAt
+	}
+	return defaultConfirmAt
+}
 
 // culiAuthored reports whether a card was written by culi (import, learning,
 // MCP save_lesson) and may therefore be rewritten via knowledge.UpdateFile.
@@ -36,7 +46,9 @@ func culiAuthored(c knowledge.Card) bool {
 
 // writeCandidate creates a new candidate card file. Never overwrites (C4):
 // slug collisions get a deterministic short-ID suffix, like save_lesson.
-func (m *Miner) writeCandidate(ctx context.Context, typ string, c cardOut, repo string) (string, error) {
+// confirmed reports whether the threshold is so low (learn.confirm_at ≤ 1) that
+// the card is born confirmed and injecting on its first sighting.
+func (m *Miner) writeCandidate(ctx context.Context, typ string, c cardOut, repo string) (id string, confirmed bool, err error) {
 	scope := validScope(c.Scope, repo)
 	kw := c.Keywords
 	if len(kw) > 5 {
@@ -46,6 +58,11 @@ func (m *Miner) writeCandidate(ctx context.Context, typ string, c cardOut, repo 
 	if ev := strings.TrimSpace(c.Evidence); ev != "" {
 		body += "\n\n**Evidence:** " + firstLine(ev)
 	}
+	confirmed = m.confirmThreshold() <= 1 // one observation already meets it
+	status := "candidate"
+	if confirmed {
+		status = "confirmed"
+	}
 	card := knowledge.Card{
 		Type:         typ,
 		Title:        strings.TrimSpace(c.Title),
@@ -53,7 +70,7 @@ func (m *Miner) writeCandidate(ctx context.Context, typ string, c cardOut, repo 
 		Body:         body,
 		Scopes:       []string{scope},
 		Triggers:     knowledge.Triggers{Keywords: kw},
-		Status:       "candidate",
+		Status:       status,
 		Observations: 1,
 		Supersedes:   m.validSupersedes(ctx, c.Supersedes),
 		Provenance:   &knowledge.Provenance{Source: "learn", Model: m.Tier.Cheap.ModelName()},
@@ -68,16 +85,16 @@ func (m *Miner) writeCandidate(ctx context.Context, typ string, c cardOut, repo 
 	}
 	rendered, err := knowledge.Render(card)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return "", fmt.Errorf("mine: creating card dir: %w", err)
+		return "", false, fmt.Errorf("mine: creating card dir: %w", err)
 	}
 	if err := os.WriteFile(abs, rendered, 0o644); err != nil {
-		return "", fmt.Errorf("mine: writing card: %w", err)
+		return "", false, fmt.Errorf("mine: writing card: %w", err)
 	}
-	m.logf("candidate %s (%s)", rel, scope)
-	return strings.TrimSuffix(filepath.ToSlash(rel), ".md"), nil
+	m.logf("%s %s (%s)", status, rel, scope)
+	return strings.TrimSuffix(filepath.ToSlash(rel), ".md"), confirmed, nil
 }
 
 // reinforce bumps an existing card's observation count; at confirmAt the card
@@ -98,7 +115,7 @@ func (m *Miner) reinforce(ctx context.Context, sc store.StoredCard, c cardOut, r
 	err = knowledge.UpdateFile(kdir, sc.Path, func(card *knowledge.Card) {
 		wasCandidate := card.Status == "candidate"
 		card.Observations++
-		if card.Observations >= confirmAt && wasCandidate {
+		if card.Observations >= m.confirmThreshold() && wasCandidate {
 			card.Status = "confirmed"
 			confirmed = true
 			supersedes = card.Supersedes

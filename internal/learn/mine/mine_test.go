@@ -116,6 +116,15 @@ func TestCleanSessionCostsNothing(t *testing.T) {
 	}
 }
 
+// selfMineSentinel is a hand-maintained copy of mineSystem's opening; if the
+// prompt's first line is ever edited without updating the sentinel, backlog
+// self-mining detection silently breaks. This guards the "keep in sync" comment.
+func TestSelfMineSentinelMatchesPrompt(t *testing.T) {
+	if !strings.HasPrefix(mineSystem, selfMineSentinel) {
+		t.Fatalf("selfMineSentinel drifted from mineSystem opening:\n  sentinel: %q\n  prompt:   %q…", selfMineSentinel, mineSystem[:min(len(mineSystem), 80)])
+	}
+}
+
 // A transcript that is one of culi's own `claude -p` mining calls (its user
 // prompt opens with the mine system prompt) must be skipped for free: no model
 // call, cursor advanced so the job drains, a note recorded.
@@ -200,6 +209,74 @@ func TestMineCreatesCandidate(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "wrapped errors") {
 		t.Errorf("ledger = %s", raw)
+	}
+}
+
+// learn.confirm_at: 1 confirms a candidate on its first sighting — no second
+// observation, no manual review. The card is born confirmed and injecting.
+func TestConfirmAtOneConfirmsOnFirstSighting(t *testing.T) {
+	cheap := &fakeGen{payload: lessonPayload}
+	m, done := newMiner(t, cheap, cheap)
+	defer done()
+	m.ConfirmAt = 1
+	path := correctionTranscript(t, t.TempDir())
+
+	res, _, err := m.MineSession(context.Background(), queue.Job{SessionID: "s1", TranscriptPath: path}, queue.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Created) != 0 || len(res.Confirmed) != 1 {
+		t.Fatalf("created=%v confirmed=%v, want 0 created / 1 confirmed", res.Created, res.Confirmed)
+	}
+	kdir := config.KnowledgeDir(m.Base)
+	card, err := knowledge.ReadCard(kdir, res.Confirmed[0]+".md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if card.Status != "confirmed" || card.Observations != 1 {
+		t.Errorf("card = status %q obs %d, want confirmed/1", card.Status, card.Observations)
+	}
+	// Indexed as confirmed → eligible for retrieval immediately.
+	sc, err := m.Store.CardByID(context.Background(), res.Confirmed[0])
+	if err != nil || sc.Status != "confirmed" {
+		t.Errorf("indexed status = %q (%v), want confirmed", sc.Status, err)
+	}
+}
+
+// A higher threshold delays confirmation: at confirm_at: 3 a second observation
+// reinforces but does not yet confirm.
+func TestConfirmAtThreeDelaysConfirm(t *testing.T) {
+	cheap := &fakeGen{payload: lessonPayload}
+	m, done := newMiner(t, cheap, cheap)
+	defer done()
+	m.ConfirmAt = 3
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	p1 := correctionTranscript(t, dir)
+	r1, _, err := m.MineSession(ctx, queue.Job{SessionID: "s1", TranscriptPath: p1}, queue.Cursor{})
+	if err != nil || len(r1.Created) != 1 {
+		t.Fatalf("first mine: created=%v err=%v", r1.Created, err)
+	}
+	// Second, distinct session re-observes the same lesson.
+	sub := filepath.Join(dir, "second")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p2 := correctionTranscript(t, sub)
+	r2, _, err := m.MineSession(ctx, queue.Job{SessionID: "s2", TranscriptPath: p2}, queue.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r2.Reinforced) != 1 || len(r2.Confirmed) != 0 {
+		t.Fatalf("second mine: reinforced=%v confirmed=%v, want reinforced / not-yet-confirmed", r2.Reinforced, r2.Confirmed)
+	}
+	card, err := knowledge.ReadCard(config.KnowledgeDir(m.Base), r1.Created[0]+".md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if card.Status != "candidate" || card.Observations != 2 {
+		t.Errorf("card = status %q obs %d, want candidate/2", card.Status, card.Observations)
 	}
 }
 

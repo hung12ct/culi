@@ -124,7 +124,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model)
 	miner := &mine.Miner{
 		Base: base, Store: s, Tier: tier,
-		Emb: e, EmbModel: cfg.Ollama.Model, Logf: logf,
+		Emb: e, EmbModel: cfg.Ollama.Model, ConfirmAt: cfg.Learn.ConfirmAt, Logf: logf,
 	}
 	cursors := queue.LoadCursors(stateDir)
 	now := time.Now().UTC()
@@ -209,7 +209,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		// are concurrency-safe and shared.
 		writeMu := &sync.Mutex{}
 		newMiner := func() *mine.Miner {
-			return &mine.Miner{Base: base, Store: s, Tier: tier, Emb: e, EmbModel: cfg.Ollama.Model, Logf: logf, WriteMu: writeMu}
+			return &mine.Miner{Base: base, Store: s, Tier: tier, Emb: e, EmbModel: cfg.Ollama.Model, ConfirmAt: cfg.Learn.ConfirmAt, Logf: logf, WriteMu: writeMu}
 		}
 		type task struct {
 			job queue.Job
