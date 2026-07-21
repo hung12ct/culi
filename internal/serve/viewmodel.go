@@ -558,6 +558,11 @@ func (s *server) buildSettings() settingsPayload {
 			{Key: "daily_usd_cap", Desc: "hard stop on learn spend", Value: fmt.Sprintf("%.2f", c.Learn.DailyUSDCap), Width: "80px"},
 			{Key: "daily_call_cap", Desc: "model calls per day", Value: itoa(c.Learn.DailyCallCap), Width: "70px"},
 		}},
+		{Title: "Learning backend", Items: []setItem{
+			{Key: "provider", Desc: "auto · anthropic · claude-cli · ollama · none", Value: c.Learn.Provider, Width: "120px"},
+			{Key: "oauth_token_file", Desc: "file with CLAUDE_CODE_OAUTH_TOKEN (headless subscription auth)", Value: c.Learn.OAuthTokenFile, Width: "260px"},
+			{Key: "anthropic_api_key_file", Desc: "file with ANTHROPIC_API_KEY (headless metered API)", Value: c.Learn.AnthropicAPIKeyFile, Width: "260px"},
+		}},
 		{Title: "Gate", Items: []setItem{
 			{Key: "extra_acks", Desc: "always-skip acknowledgements", Value: strings.Join(c.ExtraAcks, ", "), Width: "160px"},
 			{Key: "extra_stopwords", Desc: "never trigger on these", Value: strings.Join(c.ExtraStopwords, ", "), Width: "160px"},

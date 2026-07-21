@@ -403,16 +403,28 @@ func (s *server) handleReposPost(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, repoInfos(clean))
 }
 
-// handleConfigPost is read-only in this build. config.yaml carries the
-// operator's own comments (C4: never destroy user content), and a naive
-// marshal-overwrite would strip them, so the console does not write it — it
-// says so rather than faking a save.
+// handleConfigPost writes the whitelisted safe knobs into config.yaml,
+// preserving the operator's comments and every unlisted key (C4). Only the
+// keys config.SetKnobs recognizes are written; everything else in the body is
+// ignored. Secrets never travel here — the token/key fields hold file paths.
 func (s *server) handleConfigPost(w http.ResponseWriter, r *http.Request) {
 	if !s.guardLocal(w, r) {
 		return
 	}
-	s.writeJSON(w, http.StatusOK, map[string]any{
-		"saved": false,
-		"note":  "settings are read-only here — edit config.yaml directly to keep its comments",
-	})
+	var patch map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, map[string]any{"saved": false, "note": "bad request body"})
+		return
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	applied, err := config.SetKnobs(s.base, patch)
+	if err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"saved": false, "note": err.Error()})
+		return
+	}
+	if cfg, lerr := config.Load(s.base); lerr == nil {
+		s.setConfig(cfg)
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"saved": true, "applied": applied})
 }
