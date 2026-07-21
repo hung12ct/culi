@@ -54,6 +54,10 @@ func Learn(args []string) error {
 		logf("backend: %s", sum.Backend)
 	}
 	logf("jobs: %d (%d mined, %d clean)", sum.Jobs, sum.Mined, sum.Clean)
+	if sum.BackendDown {
+		logf("learning halted: backend unavailable — jobs kept queued, cap untouched. " +
+			"claude CLI: run `claude auth login`; API: set ANTHROPIC_API_KEY.")
+	}
 	for _, id := range sum.Created {
 		logf("candidate  %s", id)
 	}

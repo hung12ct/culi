@@ -12,9 +12,10 @@ import (
 
 // fakeGen counts calls and returns fixed usage.
 type fakeGen struct {
-	name  string
-	calls int
-	fail  bool
+	name    string
+	calls   int
+	fail    bool
+	failMsg string // custom error text when fail is set (default "boom")
 }
 
 func (g *fakeGen) ModelName() string { return g.name }
@@ -23,7 +24,11 @@ func (g *fakeGen) Generate(_ context.Context, _, _, _ string, _ map[string]any, 
 	g.calls++
 	u := llmgen.Usage{Prompt: 1000, Completion: 500}
 	if g.fail {
-		return u, errors.New("boom")
+		msg := g.failMsg
+		if msg == "" {
+			msg = "boom"
+		}
+		return u, errors.New(msg)
 	}
 	return u, nil
 }
@@ -91,6 +96,30 @@ func TestGenerateRecordsFailedCalls(t *testing.T) {
 	}
 	if d := tier.ledger.Days[day(time.Now().UTC())]; d.Calls != 1 || d.Prompt != 1000 {
 		t.Errorf("failed call not recorded: %+v", d)
+	}
+}
+
+// A deterministic auth/config failure (logged-out CLI, bad key) must return
+// ErrBackendUnavailable and NOT be folded into the daily cap — otherwise
+// identical retries would drain daily_call_cap and stall learning after login.
+func TestGenerateSkipsBackendUnavailable(t *testing.T) {
+	cases := []string{
+		"running claude -p: exit status 1 (Not logged in · Please run /login)",
+		"anthropic: 401 authentication_error: invalid x-api-key",
+	}
+	for _, msg := range cases {
+		cheap := &fakeGen{name: "m", fail: true, failMsg: msg}
+		tier := testTier(t, cheap, cheap, 0, 40)
+		_, err := tier.Generate(context.Background(), false, "s", "u", "n", nil, nil)
+		if !errors.Is(err, ErrBackendUnavailable) {
+			t.Errorf("%q: err = %v, want ErrBackendUnavailable", msg, err)
+		}
+		if !IsStop(err) {
+			t.Errorf("%q: IsStop = false, want true", msg)
+		}
+		if d := tier.ledger.Days[day(time.Now().UTC())]; d.Calls != 0 {
+			t.Errorf("%q: backend-unavailable call was recorded: %+v", msg, d)
+		}
 	}
 }
 

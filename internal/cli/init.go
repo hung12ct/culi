@@ -93,6 +93,14 @@ ollama:
 #   daily_call_cap: 40     # all backends - the subscription-quota guard
 #   candidate_ttl_days: 30 # auto-retire candidates unreinforced this long;
 #                          # -1 disables. Confirmed cards are never auto-retired.
+#   # Headless-learning auth (pick ONE; both empty/unset = off, ~ expands):
+#   # Claude Code doesn't pass its OAuth token or an API key to hook-spawned
+#   # processes, so background mining gets "Not logged in". Point culi at a file:
+#   #   • subscription (free)   — a file holding CLAUDE_CODE_OAUTH_TOKEN:
+#   oauth_token_file: ~/.claude-tokens/account-my.token
+#   #   • metered API (paid)    — a file holding ANTHROPIC_API_KEY; also makes
+#   #                             provider:auto prefer the API and track real $:
+#   anthropic_api_key_file: ~/.anthropic/api-key
 `
 		if err := os.WriteFile(cfgPath, []byte(defaultCfg), 0o644); err != nil {
 			return fmt.Errorf("cli: writing config.yaml: %w", err)

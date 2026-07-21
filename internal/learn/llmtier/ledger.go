@@ -16,6 +16,22 @@ import (
 // now, keep everything queued" — the queue drains after midnight UTC.
 var ErrCapped = errors.New("llmtier: daily learning cap reached")
 
+// ErrBackendUnavailable reports the learning backend could not be reached in a
+// way retrying this run won't fix: the claude CLI is logged out, or the API key
+// is missing/invalid. Workers stop the run and keep jobs queued (like
+// ErrCapped) — and, crucially, Generate does NOT fold such a failure into the
+// daily cap: it spent nothing and every queued job would fail identically, so
+// counting it would let a logged-out CLI burn the whole daily_call_cap and
+// block learning even after the user logs back in.
+var ErrBackendUnavailable = errors.New("llmtier: learning backend unavailable")
+
+// IsStop reports errors on which a worker should halt the current run and leave
+// its jobs queued (never park them): the daily cap is reached, or the backend
+// is unavailable. Both are transient with respect to the job itself.
+func IsStop(err error) bool {
+	return errors.Is(err, ErrCapped) || errors.Is(err, ErrBackendUnavailable)
+}
+
 // ledgerRetentionDays bounds spend.json growth.
 const ledgerRetentionDays = 90
 

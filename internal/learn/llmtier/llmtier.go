@@ -48,34 +48,37 @@ func Resolve(lc config.LearnConfig, ollamaEndpoint, stateDir string) (*Tier, str
 		return NewTier(cheap, strong, stateDir, lc.DailyUSDCap, lc.DailyCallCap, priced), desc, nil
 	}
 	anthropicPair := func() (*Tier, string, error) {
-		cheap, err := llmgen.NewAnthropic(lc.CheapModel)
+		cheap, err := llmgen.NewAnthropic(lc.CheapModel, lc.AnthropicAPIKeyFile)
 		if err != nil {
 			return nil, "", err
 		}
-		strong, err := llmgen.NewAnthropic(lc.StrongModel)
+		strong, err := llmgen.NewAnthropic(lc.StrongModel, lc.AnthropicAPIKeyFile)
 		if err != nil {
 			return nil, "", err
 		}
 		return mk(cheap, strong, true, lc.CheapModel+"→"+lc.StrongModel+" via Anthropic API")
 	}
 	cliPair := func() (*Tier, string, error) {
-		cheap, err := llmgen.NewCLI(lc.CheapModel)
+		cheap, err := llmgen.NewCLI(lc.CheapModel, lc.OAuthTokenFile)
 		if err != nil {
 			return nil, "", err
 		}
-		strong, err := llmgen.NewCLI(lc.StrongModel)
+		strong, err := llmgen.NewCLI(lc.StrongModel, lc.OAuthTokenFile)
 		if err != nil {
 			return nil, "", err
 		}
 		return mk(cheap, strong, false, lc.CheapModel+"→"+lc.StrongModel+" via claude CLI")
 	}
 
+	// A configured API-key file counts as "have a key" everywhere the env var
+	// does — headless learning reads the key from the file (see NewAnthropic).
+	haveAPIKey := os.Getenv("ANTHROPIC_API_KEY") != "" || lc.AnthropicAPIKeyFile != ""
 	switch lc.Provider {
 	case "none":
 		return nil, "learning LLM disabled (learn.provider: none)", nil
 	case "anthropic":
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			return nil, "", fmt.Errorf("llmtier: provider anthropic needs ANTHROPIC_API_KEY")
+		if !haveAPIKey {
+			return nil, "", fmt.Errorf("llmtier: provider anthropic needs ANTHROPIC_API_KEY (env or learn.anthropic_api_key_file)")
 		}
 		return anthropicPair()
 	case "claude-cli":
@@ -88,7 +91,7 @@ func Resolve(lc config.LearnConfig, ollamaEndpoint, stateDir string) (*Tier, str
 			llmgen.NewOllama(ollamaEndpoint, lc.StrongModel), false,
 			lc.CheapModel+"→"+lc.StrongModel+" via local Ollama")
 	case "auto", "":
-		if os.Getenv("ANTHROPIC_API_KEY") != "" {
+		if haveAPIKey {
 			if t, desc, err := anthropicPair(); err == nil {
 				return t, desc, nil
 			}
@@ -104,8 +107,11 @@ func Resolve(lc config.LearnConfig, ollamaEndpoint, stateDir string) (*Tier, str
 }
 
 // Generate runs one capped structured call on the chosen tier. Usage is
-// recorded even for failed calls — the user paid for every attempt. A cap hit
-// returns ErrCapped before any model call; the caller leaves its work queued.
+// recorded even for failed calls — the user paid for every attempt — EXCEPT
+// deterministic backend-unavailable failures (auth/config), which spent nothing
+// and would otherwise let identical retries drain the cap (see
+// isBackendUnavailable / ErrBackendUnavailable). A cap hit returns ErrCapped
+// before any model call; the caller leaves its work queued.
 func (t *Tier) Generate(ctx context.Context, strong bool, system, user, name string, schema map[string]any, out any) (llmgen.Usage, error) {
 	gen := t.Cheap
 	if strong {
@@ -116,6 +122,15 @@ func (t *Tier) Generate(ctx context.Context, strong bool, system, user, name str
 		return llmgen.Usage{}, err
 	}
 	usage, err := gen.Generate(ctx, system, user, name, schema, out)
+	if err != nil && isBackendUnavailable(err) {
+		// Deterministic env failure (CLI logged out / bad API key): nothing was
+		// spent and a retry this run fails identically. Do NOT record the call —
+		// otherwise 40 identical login failures exhaust daily_call_cap and stall
+		// learning even after the user re-authenticates. Surface a typed error so
+		// the runner stops the batch and keeps jobs queued instead of parking
+		// good transcripts as "failed".
+		return usage, fmt.Errorf("llmtier: %w: %v", ErrBackendUnavailable, err)
+	}
 	usd := 0.0
 	if t.priced {
 		usd = estimateUSD(gen.ModelName(), usage)
@@ -128,4 +143,24 @@ func (t *Tier) Generate(ctx context.Context, strong bool, system, user, name str
 		return usage, fmt.Errorf("llmtier: %w", err)
 	}
 	return usage, nil
+}
+
+// isBackendUnavailable spots deterministic auth/config failures that retrying
+// this run cannot fix — a logged-out claude CLI or a missing/invalid API key.
+// String-matched as a local workaround: gopheragent's llmgen returns these as
+// opaque wrapped errors today. Replace with a typed llmgen auth/config error
+// once upstream exposes one (logged to gopheragent BACKLOG.md).
+func isBackendUnavailable(err error) bool {
+	s := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"not logged in",        // claude CLI, signed out
+		"/login",               // claude CLI, "Please run /login"
+		"invalid x-api-key",    // Anthropic API, bad key
+		"authentication_error", // Anthropic API error type
+	} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
 }

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -15,17 +17,22 @@ import (
 // way: no server-side schema enforcement, so output is decoded leniently and
 // retried once with the decode error fed back.
 type cliGen struct {
-	bin   string
-	model string
+	bin       string
+	model     string
+	tokenFile string // optional: read CLAUDE_CODE_OAUTH_TOKEN from here (see NewCLI)
 }
 
-// NewCLI builds a generator on the claude CLI found in PATH.
-func NewCLI(model string) (Generator, error) {
+// NewCLI builds a generator on the claude CLI found in PATH. tokenFile is
+// optional (""): when set, each headless call reads a CLAUDE_CODE_OAUTH_TOKEN
+// from that file and injects it into the subprocess env — needed for headless
+// background learning, since Claude Code does not hand its OAuth token to
+// hook-spawned processes.
+func NewCLI(model, tokenFile string) (Generator, error) {
 	bin, err := exec.LookPath("claude")
 	if err != nil {
 		return nil, fmt.Errorf("llmgen: claude CLI not found in PATH: %w", err)
 	}
-	return &cliGen{bin: bin, model: model}, nil
+	return &cliGen{bin: bin, model: model, tokenFile: tokenFile}, nil
 }
 
 // ModelName tags the model with the transport so provenance records how the
@@ -72,6 +79,15 @@ func (g *cliGen) Generate(ctx context.Context, system, user, name string, schema
 func (g *cliGen) invoke(ctx context.Context, prompt string) (cliResult, error) {
 	var res cliResult
 	cmd := exec.CommandContext(ctx, g.bin, "-p", "--output-format", "json", "--model", g.model)
+	if g.tokenFile != "" {
+		tok, err := readCredentialFile(g.tokenFile, "learn.oauth_token_file")
+		if err != nil {
+			return res, err
+		}
+		// Appended last so it wins over any inherited (stale) value — the
+		// configured file is the authoritative account for headless learning.
+		cmd.Env = append(os.Environ(), "CLAUDE_CODE_OAUTH_TOKEN="+tok)
+	}
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -92,4 +108,28 @@ func (g *cliGen) invoke(ctx context.Context, prompt string) (cliResult, error) {
 		return res, fmt.Errorf("claude -p reported an error: %s", firstLineOf(res.Result))
 	}
 	return res, nil
+}
+
+// readCredentialFile reads a secret (OAuth token or API key) from path (leading
+// ~ expands to the home dir), trimming surrounding whitespace/newlines the way
+// a shell's $(cat …) would. A missing/empty file is a clear error naming the
+// config field (label), not a silent fall-through to "Not logged in". The
+// secret is never logged.
+func readCredentialFile(path, label string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("llmgen: resolving ~ in %s: %w", label, err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("llmgen: reading %s %q: %w", label, path, err)
+	}
+	secret := strings.TrimSpace(string(b))
+	if secret == "" {
+		return "", fmt.Errorf("llmgen: %s %q is empty", label, path)
+	}
+	return secret, nil
 }

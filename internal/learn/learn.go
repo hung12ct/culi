@@ -33,20 +33,21 @@ const embedBudget = 5 * time.Second
 
 // Summary reports one worker run.
 type Summary struct {
-	Backend    string
-	Jobs       int // jobs seen
-	Mined      int // sessions that produced windows and a model call
-	Clean      int // sessions with zero windows (free)
-	Created    []string
-	Reinforced []string
-	Confirmed  []string
-	Retired    []string
-	StyleObs   int
-	Style      style.Result    // pipeline B synthesis, when it fired
-	Patterns   patterns.Result // pipeline D branch index
-	Usage      llmgen.Usage
-	Notes      []string
-	Capped     bool
+	Backend     string
+	Jobs        int // jobs seen
+	Mined       int // sessions that produced windows and a model call
+	Clean       int // sessions with zero windows (free)
+	Created     []string
+	Reinforced  []string
+	Confirmed   []string
+	Retired     []string
+	StyleObs    int
+	Style       style.Result    // pipeline B synthesis, when it fired
+	Patterns    patterns.Result // pipeline D branch index
+	Usage       llmgen.Usage
+	Notes       []string
+	Capped      bool
+	BackendDown bool // backend unavailable (CLI logged out / bad key) — run halted, jobs kept queued
 }
 
 // Options tunes one worker run.
@@ -131,6 +132,11 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 			sum.Notes = append(sum.Notes, firstNoteLine(err))
 			break // keep this job and the rest queued
 		}
+		if errors.Is(err, llmtier.ErrBackendUnavailable) {
+			sum.BackendDown = true
+			sum.Notes = append(sum.Notes, firstNoteLine(err))
+			break // env problem, not a bad transcript — keep this job and the rest queued
+		}
 		if err != nil {
 			parked, ferr := queue.Fail(job)
 			note := fmt.Sprintf("job %s failed: %v", job.SessionID, err)
@@ -169,7 +175,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 	// Pipeline B: policy-gated style synthesis over the observations ledger.
 	// Skipped when the mining loop already hit the caps; its own call passes
 	// the same ledger either way.
-	if !sum.Capped {
+	if !sum.Capped && !sum.BackendDown {
 		synth := &style.Synthesizer{Base: base, Store: s, Tier: tier}
 		sres, err := synth.Run(ctx, opts.ForceStyle, time.Now().UTC())
 		sum.Style = sres
@@ -181,7 +187,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 
 	// Pipeline D: branch-tip pattern index over the configured repos. Tips
 	// comparison is milliseconds of git; unmoved repos cost nothing.
-	if !sum.Capped {
+	if !sum.Capped && !sum.BackendDown {
 		pr := &patterns.Runner{Base: base, Store: s, Tier: tier, Logf: logf}
 		pres, err := pr.Run(ctx, cfg.Repos)
 		sum.Patterns = pres
