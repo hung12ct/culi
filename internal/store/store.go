@@ -15,7 +15,10 @@ import (
 
 // schemaVersion is compared against PRAGMA user_version at open; a mismatch
 // drops every table and recreates. Only disposable history is lost.
-const schemaVersion = 1
+//
+// v2: injections gained a `cwd` column so the review console can show which
+// repo each injection happened in.
+const schemaVersion = 2
 
 // Store wraps the SQLite handle. Safe for concurrent use (database/sql pools;
 // WAL allows one writer + many readers).
@@ -138,7 +141,8 @@ CREATE TABLE injections (
   card_id     TEXT NOT NULL,
   granularity TEXT NOT NULL,             -- hook | summary | body
   prompt_hash TEXT NOT NULL DEFAULT '',
-  tokens      INTEGER NOT NULL
+  tokens      INTEGER NOT NULL,
+  cwd         TEXT NOT NULL DEFAULT ''   -- working dir at injection time (repo attribution)
 );
 CREATE INDEX idx_inj_session ON injections(session_id, card_id);
 
