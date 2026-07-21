@@ -17,6 +17,10 @@ import (
 // zombie holding the lock forever (the lock's staleness guard is the backstop).
 const learnTimeout = 15 * time.Minute
 
+// noCapTimeout gives a --no-cap run room to drain a large backlog in one pass
+// (mining is one model call per transcript window).
+const noCapTimeout = 2 * time.Hour
+
 // Learn drains the learning inbox once. --auto is the detached mode the
 // session-end hook spawns: all output goes to logs/learn.log, exit is always
 // clean (a background learner must never surface errors into a terminal that
@@ -26,6 +30,7 @@ func Learn(args []string) error {
 	fromStart := fs.Bool("from-start", false, "ignore cursors and re-mine transcripts from the beginning")
 	forceStyle := fs.Bool("style", false, "force style synthesis now (bypass the weekly/15-observation trigger)")
 	auto := fs.Bool("auto", false, "background mode: log to ~/.culi/logs/learn.log (used by the session-end hook)")
+	noCap := fs.Bool("no-cap", false, "ignore the daily USD/call caps — mine the whole backlog in one run")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
 	}
@@ -39,9 +44,13 @@ func Learn(args []string) error {
 		logf = fileLogf(base, "learn.log")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), learnTimeout)
+	timeout := learnTimeout
+	if *noCap {
+		timeout = noCapTimeout // room to drain a large backlog in one run
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	sum, err := learn.Run(ctx, base, cfg, learn.Options{FromStart: *fromStart, ForceStyle: *forceStyle}, logf)
+	sum, err := learn.Run(ctx, base, cfg, learn.Options{FromStart: *fromStart, ForceStyle: *forceStyle, IgnoreCaps: *noCap}, logf)
 	if err != nil {
 		if *auto {
 			logf("learn: %v", err)

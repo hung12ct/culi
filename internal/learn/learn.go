@@ -54,6 +54,7 @@ type Summary struct {
 type Options struct {
 	FromStart  bool // ignore cursors, re-mine transcripts from the beginning
 	ForceStyle bool // bypass the style-synthesis trigger policy
+	IgnoreCaps bool // drain the whole backlog now, ignoring the daily USD/call caps
 }
 
 // Run drains the inbox once and fires the policy-gated style synthesis.
@@ -81,6 +82,15 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		return sum, err
 	}
 	sum.Jobs = len(jobs)
+
+	// --no-cap: drain the whole backlog in one run. Zero caps disable the gate
+	// (see ledger.Allow), so this deliberately bypasses daily_usd_cap /
+	// daily_call_cap for this run only (cfg is our local copy).
+	if opts.IgnoreCaps {
+		cfg.Learn.DailyUSDCap = 0
+		cfg.Learn.DailyCallCap = 0
+		sum.Notes = append(sum.Notes, "caps ignored (--no-cap): draining the full backlog")
+	}
 
 	tier, desc, err := llmtier.Resolve(cfg.Learn, cfg.Ollama.Endpoint, stateDir)
 	if err != nil {

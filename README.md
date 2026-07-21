@@ -158,6 +158,7 @@ works. Two fixes:
 
 ```bash
 culi learn              # mine queued transcripts once, print results
+culi learn --no-cap     # ignore the daily caps and drain the whole backlog in one run
 culi learn --from-start # ignore cursors, re-mine every transcript from scratch
 culi learn --style      # force style synthesis now (bypass the trigger policy)
 culi learn --auto       # background mode (quiet, logs to ~/.culi/logs/learn.log) — used by the hook
