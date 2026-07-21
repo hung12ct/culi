@@ -133,6 +133,7 @@ function renderStrip() {
   set('s-cards', st.cards != null ? st.cards : '—');
   set('s-saved', st.savedPct != null ? st.savedPct : '—');
   set('s-review', (state.candidates ? state.candidates.length : (st.toReview != null ? st.toReview : '—')));
+  set('s-learn', st.toLearn != null ? st.toLearn : '—');
   set('s-addr', st.addr || 'localhost:7378');
   const dot = document.getElementById('serve-dot');
   if (dot) dot.classList.toggle('down', st.serveDown === true);

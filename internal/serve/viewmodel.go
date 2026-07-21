@@ -23,6 +23,7 @@ type statusPayload struct {
 	Cards         int     `json:"cards"`
 	SavedPct      string  `json:"savedPct"`
 	ToReview      int     `json:"toReview"`
+	ToLearn       int     `json:"toLearn"` // queued transcripts waiting to be mined
 	Addr          string  `json:"addr"`
 	SpendToday    float64 `json:"spendToday"`
 	SpendCap      float64 `json:"spendCap"`
@@ -220,8 +221,9 @@ type statsView struct {
 		Stale []string `json:"stale"`
 	} `json:"cards"`
 	Learning struct {
-		FailedJobs int `json:"failed_jobs"`
-		SpendToday struct {
+		InboxPending int `json:"inbox_pending"`
+		FailedJobs   int `json:"failed_jobs"`
+		SpendToday   struct {
 			Calls int     `json:"calls"`
 			USD   float64 `json:"usd"`
 		} `json:"spend_today"`
@@ -256,6 +258,7 @@ func (s *server) buildStatus(ctx context.Context) statusPayload {
 		Cards:         len(metas),
 		SavedPct:      fmtPct(sv.Retrieval.Counterfactual.DumpTokens, sv.Retrieval.Counterfactual.SavedPercent),
 		ToReview:      toReview,
+		ToLearn:       sv.Learning.InboxPending,
 		Addr:          s.addr,
 		SpendToday:    sv.Learning.SpendToday.USD,
 		SpendCap:      s.config().Learn.DailyUSDCap,
