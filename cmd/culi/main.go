@@ -31,6 +31,7 @@ Usage:
   culi stats [--json]           token accounting, gate economics, learning spend
   culi serve [--addr host:port] local web review console (default localhost:7378)
   culi statusline               Claude Code statusLine segment (stdin JSON; internal)
+  culi version                  print the running build's version + git commit
 `
 
 func main() {
@@ -70,6 +71,8 @@ func main() {
 		exit(cli.Serve(os.Args[2:]))
 	case "statusline":
 		exit(cli.Statusline(os.Args[2:]))
+	case "version", "--version", "-v":
+		exit(cli.Version(os.Args[2:]))
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:
