@@ -879,6 +879,7 @@ function renderReposModal() {
       <div class="modal">
         <div class="modal-head"><span><span class="modal-head-title">Watched repositories</span><span class="modal-head-sub">${repos.length} · reconciled + scoped</span></span>
           <button class="repo-x" data-act="repoClose" title="Close">×</button></div>
+        <div class="modal-note">For <b>learning &amp; generation</b> — mining git history and <span class="mono">culi gen</span>. Context injection works in <b>any</b> repo regardless of this list.</div>
         <div class="modal-list">${rows}</div>
         <div class="repo-add">
           <input id="repo-add-input" class="mono" placeholder="/absolute/path/to/repo" autocomplete="off" spellcheck="false" />
