@@ -74,6 +74,14 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 	}
 	event := args[0]
 
+	// Skip every event inside culi's own headless `claude -p` learning calls
+	// (llmgen sets this env). Injecting context would contaminate the mining
+	// prompt; enqueuing the call's transcript would make learning mine its own
+	// calls (self-ingestion loop). Expected, not an error: silent empty output.
+	if os.Getenv(config.InternalEnv) != "" {
+		return 0
+	}
+
 	deadline := promptDeadline
 	eventName := "UserPromptSubmit"
 	switch event {

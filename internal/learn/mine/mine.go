@@ -38,7 +38,10 @@ type Miner struct {
 	Tier     *llmtier.Tier
 	Emb      embed.Embedder // nil ⇒ lexical dedup only
 	EmbModel string
-	Logf     func(format string, args ...any) // optional diagnostics
+	// ConfirmAt overrides the observations-to-confirm threshold (learn.confirm_at).
+	// 0 ⇒ defaultConfirmAt. 1 auto-confirms candidates on first sighting.
+	ConfirmAt int
+	Logf      func(format string, args ...any) // optional diagnostics
 	// WriteMu, when set, serializes the store-writing tail (apply + reindex)
 	// across concurrent MineSession calls — the index is single-writer (WAL),
 	// so a --no-cap parallel drain fans out the LLM calls but funnels writes.
@@ -71,6 +74,13 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 		return res, cur, fmt.Errorf("mine: %w", err)
 	}
 	next := queue.Cursor{Offset: newOff, MinedAt: time.Now().UTC()}
+	if isSelfMiningTranscript(entries) {
+		// One of culi's own `claude -p` mining calls, logged as a session and
+		// enqueued (belt-and-suspenders for the config.InternalEnv hook guard).
+		// Advance the cursor and consume the job without a model call.
+		res.Notes = append(res.Notes, "skipped culi's own mining call (self-ingestion guard)")
+		return res, next, nil
+	}
 	wins := transcript.Extract(entries)
 	res.Windows = len(wins)
 	if len(wins) == 0 {
@@ -175,9 +185,20 @@ func (m *Miner) applyCard(ctx context.Context, typ string, c cardOut, repo strin
 		res.Notes = append(res.Notes, fmt.Sprintf("skipped near-duplicate of %s: %s", match.ID, firstLine(c.Title)))
 		return nil
 	}
-	id, err := m.writeCandidate(ctx, typ, c, repo)
+	id, confirmed, err := m.writeCandidate(ctx, typ, c, repo)
 	if err != nil {
 		return err
+	}
+	if confirmed {
+		// learn.confirm_at ≤ 1: born confirmed. Retire any card it supersedes,
+		// mirroring the reinforce-path confirmation.
+		res.Confirmed = append(res.Confirmed, id)
+		if sup := m.validSupersedes(ctx, c.Supersedes); sup != "" {
+			if retired, rerr := RetireCard(ctx, m.Store, config.KnowledgeDir(m.Base), sup); rerr == nil && retired {
+				res.Retired = append(res.Retired, sup)
+			}
+		}
+		return nil
 	}
 	res.Created = append(res.Created, id)
 	return nil
@@ -211,6 +232,18 @@ func (m *Miner) logf(format string, args ...any) {
 	if m.Logf != nil {
 		m.Logf(format, args...)
 	}
+}
+
+// isSelfMiningTranscript reports whether entries are culi's own headless mining
+// call (its user prompt opens with the mine system prompt). Cheap string check
+// over already-parsed entries — no extra I/O.
+func isSelfMiningTranscript(entries []transcript.Entry) bool {
+	for _, e := range entries {
+		if e.Role == "user" && strings.HasPrefix(strings.TrimSpace(e.Text), selfMineSentinel) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstLine(s string) string {

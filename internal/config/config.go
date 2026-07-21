@@ -64,6 +64,12 @@ type LearnConfig struct {
 	// default (50); a negative value = unlimited. `culi learn --no-cap` always
 	// drains the whole backlog regardless of this.
 	MaxJobsPerRun int `yaml:"max_jobs_per_run"`
+	// ConfirmAt is how many independent observations promote a mined candidate
+	// to a confirmed, injecting card without manual review. 0 = default (2:
+	// corroboration from two separate sessions). 1 = auto-confirm on first
+	// sighting (trust the model — noisier); higher = more conservative.
+	// `culi review` can always confirm/reject sooner regardless of this.
+	ConfirmAt int `yaml:"confirm_at"`
 	// OAuthTokenFile points the claude-cli backend at a file holding a
 	// CLAUDE_CODE_OAUTH_TOKEN. Empty (default) = off. Set it when background
 	// learning runs headless: Claude Code does not propagate its OAuth token to
@@ -109,7 +115,16 @@ const (
 	defaultDailyCallCap   = 40
 	defaultCandidateTTL   = 30 // days a candidate may sit unreinforced
 	defaultMaxJobsPerRun  = 50 // newest transcripts mined per `culi learn` run
+	defaultConfirmAt      = 2  // observations that auto-confirm a mined candidate
 )
+
+// InternalEnv marks a culi-spawned subprocess (the headless `claude -p` learning
+// calls in internal/llmgen). Those calls run under the user's Claude Code
+// settings, so they inherit culi's own hooks; the hook path checks this var and
+// no-ops for every event. Without it, each mining call would get context
+// injected into its prompt (UserPromptSubmit) and its transcript enqueued
+// (SessionEnd) — culi mining its own mining calls (self-ingestion loop).
+const InternalEnv = "CULI_INTERNAL"
 
 // BaseDir returns the culi home directory: $CULI_HOME if set, else ~/.culi.
 func BaseDir() (string, error) {
@@ -204,6 +219,11 @@ func Load(base string) (Config, error) {
 	// Zero defaults to 50; a negative value means "no per-run limit".
 	if cfg.Learn.MaxJobsPerRun == 0 {
 		cfg.Learn.MaxJobsPerRun = defaultMaxJobsPerRun
+	}
+	// Confirmation needs at least one observation; anything below 1 (unset or a
+	// nonsensical negative) falls back to the corroboration default.
+	if cfg.Learn.ConfirmAt < 1 {
+		cfg.Learn.ConfirmAt = defaultConfirmAt
 	}
 	return cfg, nil
 }

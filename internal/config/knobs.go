@@ -37,6 +37,7 @@ var knobs = map[string]knobSpec{
 	"daily_usd_cap":          {[]string{"learn", "daily_usd_cap"}, kindFloat},
 	"daily_call_cap":         {[]string{"learn", "daily_call_cap"}, kindInt},
 	"max_jobs_per_run":       {[]string{"learn", "max_jobs_per_run"}, kindInt},
+	"confirm_at":             {[]string{"learn", "confirm_at"}, kindInt},
 	"provider":               {[]string{"learn", "provider"}, kindString},
 	"cheap_model":            {[]string{"learn", "cheap_model"}, kindString},
 	"strong_model":           {[]string{"learn", "strong_model"}, kindString},

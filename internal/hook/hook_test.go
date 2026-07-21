@@ -217,6 +217,30 @@ func TestSessionEndEnqueues(t *testing.T) {
 	}
 }
 
+// Inside culi's own headless `claude -p` learning calls (CULI_INTERNAL set),
+// every event must no-op: no context injected into the mining prompt, and no
+// transcript enqueued — the guard that breaks the self-ingestion loop.
+func TestInternalEnvNoOps(t *testing.T) {
+	base := sandbox(t)
+	index(t, "sess-int")
+	t.Setenv("CULI_INTERNAL", "1")
+
+	// UserPromptSubmit: no injection even for a prompt that would normally match.
+	out, code := runHook(t, "user-prompt-submit", hookInput("sess-int", "how do I wrap errors in this project?"))
+	if code != 0 || out != "" {
+		t.Errorf("internal user-prompt-submit: code=%d out=%q, want 0/empty", code, out)
+	}
+
+	// SessionEnd: nothing enqueued.
+	raw, _ := json.Marshal(Input{SessionID: "s-int", TranscriptPath: "/tmp/tr.jsonl", CWD: "/tmp"})
+	if _, code := runHook(t, "session-end", string(raw)); code != 0 {
+		t.Errorf("internal session-end: code=%d, want 0", code)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(base, "inbox")); len(entries) != 0 {
+		t.Errorf("internal session-end enqueued %d job(s), want 0", len(entries))
+	}
+}
+
 func TestCompactResetsDedup(t *testing.T) {
 	sandbox(t)
 	index(t, "sess-c")

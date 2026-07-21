@@ -278,8 +278,9 @@ func renderText(rep report) {
 			r.GateSkipTotal, strings.Join(reasons, ", "))
 	}
 	if cf := r.Counterfactual; cf.DumpTokens > 0 {
-		fmt.Printf("  savings estimate   injected %d tokens vs ~%d if every live card loaded each session — saved ~%d (%.0f%%)\n",
+		fmt.Printf("  savings estimate   injected %d tokens vs ~%d if your whole knowledge base loaded each session — saved ~%d (%.0f%%)\n",
 			cf.Injected, cf.DumpTokens, cf.SavedTokens, cf.SavedPercent)
+		fmt.Println("                     (baseline = the always-on CLAUDE.md dump; culi injects only per-prompt relevant cards)")
 	}
 	fmt.Println()
 

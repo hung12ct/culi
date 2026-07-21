@@ -217,7 +217,7 @@ function screenOverview() {
       <div class="hero">
         <div class="hero-label">Context saved · last 7 days</div>
         <div class="hero-num-row"><div class="hero-num">${esc(o.savedPct)}</div><div class="hero-spark">${trend}</div></div>
-        <div class="hero-cf"><b>${esc(o.cf.injected)}</b> tokens injected across <b>${esc(o.cf.sessions)}</b> sessions — versus <b>${esc(o.cf.vsAll)}</b> if every card loaded every session.</div>
+        <div class="hero-cf" title="Baseline = loading your whole knowledge base into every session (the always-on CLAUDE.md approach culi replaces). culi injects only the cards relevant to each prompt. It does not shrink a CLAUDE.md you keep separately — move that content into cards to save it."><b>${esc(o.cf.injected)}</b> tokens injected across <b>${esc(o.cf.sessions)}</b> sessions — versus <b>${esc(o.cf.vsAll)}</b> if your whole knowledge base loaded every session.</div>
       </div>
       <div class="tiles">${tiles}</div>
     </div>

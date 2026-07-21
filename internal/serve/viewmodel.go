@@ -556,6 +556,7 @@ func (s *server) buildSettings() settingsPayload {
 		}},
 		{Title: "Lifecycle", Items: []setItem{
 			{Key: "candidate_ttl_days", Desc: "auto-expire unreviewed candidates", Value: itoa(c.Learn.CandidateTTLDays), Width: "70px"},
+			{Key: "confirm_at", Desc: "observations to auto-confirm a candidate (1 = on first sighting)", Value: itoa(c.Learn.ConfirmAt), Width: "70px"},
 		}},
 		{Title: "Caps & spend", Items: []setItem{
 			{Key: "daily_usd_cap", Desc: "hard stop on learn spend", Value: fmt.Sprintf("%.2f", c.Learn.DailyUSDCap), Width: "80px"},
