@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/indexer"
@@ -86,7 +87,26 @@ func (s *server) handleCard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleInjections(w http.ResponseWriter, r *http.Request) {
-	s.writeJSON(w, http.StatusOK, s.buildSessions(r.Context()))
+	q := r.URL.Query()
+	s.writeJSON(w, http.StatusOK, s.buildSessions(r.Context(), q.Get("repo"), sinceCutoff(q.Get("since"))))
+}
+
+// sinceCutoff maps a date-filter preset to an absolute cutoff; a zero time
+// means "no time limit" (the "all"/unset case). Presets are computed against
+// the local clock so "today" matches the humanized timestamps in the view.
+func sinceCutoff(preset string) time.Time {
+	now := time.Now()
+	switch preset {
+	case "today":
+		y, m, d := now.Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, now.Location())
+	case "7d":
+		return now.AddDate(0, 0, -7)
+	case "30d":
+		return now.AddDate(0, 0, -30)
+	default: // "all" or unset
+		return time.Time{}
+	}
 }
 
 func (s *server) handleRuns(w http.ResponseWriter, r *http.Request) {
