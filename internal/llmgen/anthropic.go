@@ -19,12 +19,22 @@ type anthropicGen struct {
 	model    string
 }
 
-// NewAnthropic builds a generator on ANTHROPIC_API_KEY (env) and the given
-// model. Temperature 0: re-running the same call should produce the same
-// output, so review conclusions survive a re-run (best-effort — Anthropic has
-// no seed).
-func NewAnthropic(model string) (Generator, error) {
-	p, err := anthropic.New("", model, anthropic.WithMaxTokens(16384), anthropic.WithTemperature(0))
+// NewAnthropic builds a generator on the given model. apiKeyFile is optional
+// (""): when set, the ANTHROPIC_API_KEY is read from that file (headless
+// learning can't rely on the env var reaching a hook-spawned process); when
+// empty, gopheragent reads ANTHROPIC_API_KEY from the environment as before.
+// Temperature 0: re-running the same call should produce the same output, so
+// review conclusions survive a re-run (best-effort — Anthropic has no seed).
+func NewAnthropic(model, apiKeyFile string) (Generator, error) {
+	key := ""
+	if apiKeyFile != "" {
+		k, err := readCredentialFile(apiKeyFile, "learn.anthropic_api_key_file")
+		if err != nil {
+			return nil, err
+		}
+		key = k
+	}
+	p, err := anthropic.New(key, model, anthropic.WithMaxTokens(16384), anthropic.WithTemperature(0))
 	if err != nil {
 		return nil, fmt.Errorf("llmgen: creating anthropic provider: %w", err)
 	}

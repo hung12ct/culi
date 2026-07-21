@@ -24,7 +24,7 @@ func (m *GenMerger) ModelName() string { return m.gen.ModelName() }
 // NewLLMMerger builds a merger on ANTHROPIC_API_KEY (env) and the configured
 // model.
 func NewLLMMerger(model string) (*GenMerger, error) {
-	g, err := llmgen.NewAnthropic(model)
+	g, err := llmgen.NewAnthropic(model, "")
 	if err != nil {
 		return nil, fmt.Errorf("importer: creating merge provider: %w", err)
 	}
@@ -34,7 +34,10 @@ func NewLLMMerger(model string) (*GenMerger, error) {
 // NewCLIMerger builds a merger on the claude CLI found in PATH — zero API key,
 // billed to the user's existing subscription.
 func NewCLIMerger(model string) (*GenMerger, error) {
-	g, err := llmgen.NewCLI(model)
+	// Import runs interactively (`culi import`) from a shell that already carries
+	// CLAUDE_CODE_OAUTH_TOKEN, so no token-file fallback is needed here (that's a
+	// headless-learning concern — see learn.oauth_token_file).
+	g, err := llmgen.NewCLI(model, "")
 	if err != nil {
 		return nil, fmt.Errorf("importer: %w", err)
 	}

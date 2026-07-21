@@ -59,6 +59,17 @@ type LearnConfig struct {
 	// value disables the janitor. Confirmed cards are NEVER auto-retired —
 	// dormant ones are only reported by `culi stats` (C4).
 	CandidateTTLDays int `yaml:"candidate_ttl_days"`
+	// OAuthTokenFile points the claude-cli backend at a file holding a
+	// CLAUDE_CODE_OAUTH_TOKEN. Empty (default) = off. Set it when background
+	// learning runs headless: Claude Code does not propagate its OAuth token to
+	// hook-spawned processes, so `claude -p` has no auth; culi reads the token
+	// from this file and injects it into the subprocess env. Leading ~ expands.
+	OAuthTokenFile string `yaml:"oauth_token_file"`
+	// AnthropicAPIKeyFile points the anthropic backend at a file holding an
+	// ANTHROPIC_API_KEY, for users who prefer the metered API over the
+	// subscription CLI. Empty (default) = off; the env var is used when set.
+	// Its presence also makes provider:auto prefer the Anthropic API. ~ expands.
+	AnthropicAPIKeyFile string `yaml:"anthropic_api_key_file"`
 }
 
 // ImportConfig tunes `culi import merge`.

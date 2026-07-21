@@ -11,7 +11,6 @@ package patterns
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,8 +124,8 @@ func (r *Runner) indexRepo(ctx context.Context, root string, tips tipState, res 
 			return false, nil // quietly resume next run
 		}
 		mined, err := r.mineBranch(ctx, root, base, branch, cur[branch], res)
-		if errors.Is(err, llmtier.ErrCapped) {
-			return true, nil
+		if llmtier.IsStop(err) {
+			return true, nil // capped or backend down — stop, resume next run
 		}
 		if err != nil {
 			res.Notes = append(res.Notes, branch+": "+err.Error())

@@ -83,8 +83,8 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 	usage, err := m.Tier.Generate(ctx, false, system, user, "transcript_mine", mineSchema(), &out)
 	res.Usage.Add(usage)
 	if err != nil {
-		if errors.Is(err, llmtier.ErrCapped) {
-			return res, cur, err
+		if llmtier.IsStop(err) {
+			return res, cur, err // capped or backend down — don't burn a strong-tier retry
 		}
 		// Escalate once to the strong tier (plan §learning A): schema failures
 		// on small models are the expected failure mode.

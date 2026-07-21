@@ -7,7 +7,6 @@ package branchgen
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -132,8 +131,8 @@ func (g *Generator) genCards(ctx context.Context, repo, branch, factsHash, facts
 	usage, err := g.Tier.Generate(ctx, false, system, factsMD, "repo_cards", cardsSchema(), &out)
 	res.Usage.Add(usage)
 	if err != nil {
-		if errors.Is(err, llmtier.ErrCapped) {
-			return fmt.Errorf("branchgen: %w", err)
+		if llmtier.IsStop(err) {
+			return fmt.Errorf("branchgen: %w", err) // capped or backend down — skip strong-tier retry
 		}
 		out = cardsOut{}
 		usage, err = g.Tier.Generate(ctx, true, system, factsMD, "repo_cards", cardsSchema(), &out)
