@@ -59,7 +59,9 @@ func (s *Store) InjectedLevels(ctx context.Context, sessionID string) (map[strin
 }
 
 // RecordInjections logs emitted cards for dedup + stats in one transaction.
-func (s *Store) RecordInjections(ctx context.Context, sessionID, event, promptHash string, recs []InjectionRecord) error {
+// cwd is the working directory at injection time, stored for repo attribution
+// in the review console ("" when unknown — e.g. a non-git prompt).
+func (s *Store) RecordInjections(ctx context.Context, sessionID, event, promptHash, cwd string, recs []InjectionRecord) error {
 	if len(recs) == 0 {
 		return nil
 	}
@@ -69,14 +71,14 @@ func (s *Store) RecordInjections(ctx context.Context, sessionID, event, promptHa
 	}
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO injections (session_id, event, card_id, granularity, prompt_hash, tokens)
-		VALUES (?,?,?,?,?,?)`)
+		INSERT INTO injections (session_id, event, card_id, granularity, prompt_hash, tokens, cwd)
+		VALUES (?,?,?,?,?,?,?)`)
 	if err != nil {
 		return fmt.Errorf("store: preparing injection insert: %w", err)
 	}
 	defer stmt.Close()
 	for _, r := range recs {
-		if _, err := stmt.ExecContext(ctx, sessionID, event, r.CardID, r.Granularity, promptHash, r.Tokens); err != nil {
+		if _, err := stmt.ExecContext(ctx, sessionID, event, r.CardID, r.Granularity, promptHash, r.Tokens, cwd); err != nil {
 			return fmt.Errorf("store: logging injection %s: %w", r.CardID, err)
 		}
 	}

@@ -37,7 +37,7 @@ func TestStatuslineText(t *testing.T) {
 	if _, err := indexer.Sync(ctx, s, kdir); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordInjections(ctx, "sess-x", "user-prompt-submit", "h",
+	if err := s.RecordInjections(ctx, "sess-x", "user-prompt-submit", "h", "",
 		[]store.InjectionRecord{{CardID: "rules/a", Granularity: store.GranBody, Tokens: 42}}); err != nil {
 		t.Fatal(err)
 	}

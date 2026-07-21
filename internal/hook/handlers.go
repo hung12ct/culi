@@ -87,7 +87,7 @@ func handlePrompt(ctx context.Context, base string, in Input) (string, error) {
 	if len(inj.Items) == 0 {
 		return "", nil
 	}
-	if err := s.RecordInjections(ctx, in.SessionID, "user-prompt-submit", promptHash(in.Prompt), inj.Records()); err != nil {
+	if err := s.RecordInjections(ctx, in.SessionID, "user-prompt-submit", promptHash(in.Prompt), in.CWD, inj.Records()); err != nil {
 		return "", err
 	}
 	return inj.Render(), nil
@@ -156,7 +156,7 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 	if len(inj.Items) == 0 {
 		return coverageNote(ctx, s, sc), nil
 	}
-	if err := s.RecordInjections(ctx, in.SessionID, "session-start", "", inj.Records()); err != nil {
+	if err := s.RecordInjections(ctx, in.SessionID, "session-start", "", in.CWD, inj.Records()); err != nil {
 		return "", err
 	}
 	return inj.RenderWith(pack.PointerHeader), nil
