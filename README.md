@@ -1,6 +1,8 @@
-# culi ☕
-
-> **Context orchestrator for Claude Code.** One canonical knowledge store, injected *only* when it's relevant — so every prompt gets the right rules without paying to dump your whole `CLAUDE.md` every time.
+<div align="center">
+  <img src="docs/logo.png" alt="culi" width="120" height="120" />
+  <h1>culi ☕</h1>
+  <p><b>Context orchestrator for Claude Code</b> — one canonical knowledge store, injected <i>only</i> when it's relevant, so every prompt gets the right rules without paying to dump your whole <code>CLAUDE.md</code> every time.</p>
+</div>
 
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
