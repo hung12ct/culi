@@ -232,20 +232,35 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		sem := make(chan struct{}, parallelDrainWorkers)
 		out := make(chan outcome, len(tasks))
 		var wg sync.WaitGroup
-		for _, t := range tasks {
-			wg.Add(1)
-			sem <- struct{}{} // bound to parallelDrainWorkers in flight
-			go func(t task) {
-				defer wg.Done()
-				defer func() { <-sem }()
-				res, newCur, err := newMiner().MineSession(runCtx, t.job, t.cur)
-				out <- outcome{t.job, res, newCur, err}
-			}(t)
-		}
-		go func() { wg.Wait(); close(out) }()
+		// Dispatch concurrently with collect so a halt (cancel) actually stops
+		// the remaining launches instead of racing them all out first.
+		go func() {
+			for _, t := range tasks {
+				if runCtx.Err() != nil {
+					break // halted — stop dispatching; remaining jobs stay queued
+				}
+				wg.Add(1)
+				sem <- struct{}{} // bound to parallelDrainWorkers in flight
+				go func(t task) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					if runCtx.Err() != nil { // launched after a halt — don't spawn a call
+						out <- outcome{t.job, mine.Result{}, t.cur, runCtx.Err()}
+						return
+					}
+					res, newCur, err := newMiner().MineSession(runCtx, t.job, t.cur)
+					if runCtx.Err() != nil {
+						err = runCtx.Err() // killed mid-call ⇒ leave queued, don't park
+					}
+					out <- outcome{t.job, res, newCur, err}
+				}(t)
+			}
+			wg.Wait()
+			close(out)
+		}()
 		for o := range out {
 			if collect(o.job, o.res, o.newCur, o.err) {
-				cancel() // halt: in-flight workers cancel and leave their jobs queued
+				cancel() // halt: stop remaining dispatch; in-flight jobs stay queued
 			}
 		}
 	} else {
