@@ -110,6 +110,28 @@ Pick a backend with `learn.provider` (default `auto`):
 `auto` prefers the Anthropic API when a key is available (env **or** `anthropic_api_key_file`),
 otherwise falls back to the free `claude-cli`.
 
+### Local models (Ollama) — free, private, no auth
+
+The `ollama` backend sidesteps credentials entirely: mining runs on a local model, nothing leaves
+your machine, and there's no token/key/Keychain to manage. culi enforces the JSON schema
+server-side (Ollama's `format`), so structured output is reliable. Two steps:
+
+```bash
+ollama pull qwen3          # a general instruct model (not the embedding model)
+```
+```yaml
+learn:
+  provider: ollama
+  cheap_model: qwen3       # routine mining (must be a non-Claude model)
+  strong_model: qwen3      # escalation on schema failure
+ollama:
+  endpoint: http://localhost:11434   # same server as embeddings (default)
+```
+
+Trade-off: local models have weaker judgment than Claude about what's a *durable* lesson, so
+expect noisier candidates — your review queue is the quality gate. Speed is GPU-bound, and the
+`--no-cap` parallel drain helps less here (one Ollama instance tends to queue concurrent requests).
+
 ### Spend caps (hard limits)
 
 Both must pass before any call; they reset at **UTC midnight**:
