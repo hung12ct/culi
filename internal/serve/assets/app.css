@@ -425,51 +425,85 @@ input:focus, textarea:focus { outline: none; }
 .kb-actionbar .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; }
 
 /* ---------- activity ---------- */
-.act { padding: 20px 24px; max-width: 900px; margin: 0 auto; }
-.segmented { display: flex; gap: 4px; margin-bottom: 18px; background: var(--panel); border: 1px solid var(--hair); border-radius: 9px; padding: 3px; width: fit-content; }
-.seg { padding: 6px 16px; border-radius: 6px; border: none; font-size: 12.5px; font-weight: 600; cursor: pointer; background: transparent; color: var(--muted); }
+.act { padding: 20px 24px; max-width: 940px; margin: 0 auto; }
+.act-top { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+.segmented { display: flex; gap: 4px; background: var(--panel); border: 1px solid var(--hair); border-radius: 9px; padding: 3px; width: fit-content; }
+.seg { padding: 6px 16px; border-radius: 6px; border: none; font-size: 12.5px; font-weight: 600; cursor: pointer; background: transparent; color: var(--muted); transition: color .12s, background .12s; }
+.seg:hover { color: var(--tx2); }
 .seg.active { background: var(--teal); color: var(--teal-ink); }
-.sess { margin-bottom: 18px; }
-.sess-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.sess-id { font-family: var(--mono); font-size: 11px; color: var(--muted2); background: rgba(255,255,255,.05); padding: 2px 8px; border-radius: 5px; }
-.sess-repo { font-size: 12.5px; color: var(--tx2); font-weight: 500; }
-.sess-time { font-size: 11.5px; color: var(--faint); }
-.sess-tok { font-family: var(--mono); font-size: 11.5px; color: var(--teal-lt); }
-.sess-box { border: 1px solid var(--hair); border-radius: 10px; overflow: hidden; background: var(--panel); }
-.sess-conv { font-size: 11px; color: var(--faint); border: 1px solid var(--hair); border-radius: 5px; padding: 1px 7px; letter-spacing: .02em; }
-.sess-ev-wrap { border-bottom: 1px solid rgba(255,255,255,.04); }
+
+/* granularity legend + pills (shared color language with the Overview bar) */
+.gran-key { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.gran-key-lbl { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint2); margin-right: 2px; }
+.gran-key-note { font-size: 10.5px; color: var(--faint); margin-right: 6px; }
+.gran-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 2px 8px 2px 7px; border-radius: 20px; letter-spacing: .01em; }
+.gran-pill i { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+.gran-body    { color: var(--pink);    background: rgba(255,126,168,.13); } .gran-body i    { background: var(--pink); }
+.gran-summary { color: var(--blue);    background: rgba(109,180,255,.13); } .gran-summary i { background: var(--blue); }
+.gran-hook    { color: var(--teal-lt); background: rgba(62,199,187,.13); }  .gran-hook i    { background: var(--teal); }
+
+/* session card */
+.sess { margin-bottom: 16px; }
+.sess-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 0 2px; }
+.sess-repo { display: inline-flex; align-items: center; gap: 0; border: 1px solid rgba(62,199,187,.30); border-radius: 7px; overflow: hidden; background: rgba(62,199,187,.07); }
+.sess-repo .repo-tag { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--teal-lt); background: rgba(62,199,187,.15); padding: 4px 6px; }
+.sess-repo .repo-name { font-size: 12.5px; font-weight: 600; color: var(--tx); padding: 3px 9px; }
+.sess-repo.unknown { border-color: var(--hair2); background: rgba(255,255,255,.02); }
+.sess-repo.unknown .repo-tag { color: var(--faint); background: rgba(255,255,255,.05); }
+.sess-repo.unknown .repo-name { color: var(--faint); font-weight: 500; font-style: italic; }
+.sess-id { font-size: 11px; color: var(--faint); }
+.sess-time { font-size: 11.5px; color: var(--faint2); }
+.sess-nev { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
+.sess-tok { font-size: 11.5px; color: var(--teal-lt); background: rgba(62,199,187,.08); padding: 2px 8px; border-radius: 5px; }
+.sess-box { border: 1px solid var(--hair2); border-radius: 11px; overflow: hidden; background: var(--panel); }
+
+.sess-ev-wrap { border-bottom: 1px solid var(--hair); }
 .sess-ev-wrap:last-child { border-bottom: none; }
-.sess-ev { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; transition: background .12s; user-select: none; }
-.sess-ev:hover { background: rgba(255,255,255,.03); }
-.sess-ev.open { background: rgba(62,199,187,.05); }
-.sess-ev-caret { font-size: 10px; color: var(--faint); width: 10px; }
+.sess-ev-wrap.open { background: rgba(62,199,187,.035); }
+.sess-ev { display: flex; align-items: center; gap: 12px; padding: 11px 15px; cursor: pointer; transition: background .12s; user-select: none; border-left: 2px solid transparent; }
+.sess-ev:hover { background: rgba(255,255,255,.035); }
+.sess-ev.open { border-left-color: var(--teal); background: transparent; }
+.sess-ev-caret { font-size: 9px; color: var(--faint); width: 9px; transition: color .12s; }
+.sess-ev:hover .sess-ev-caret { color: var(--muted); }
 .sess-ev.open .sess-ev-caret { color: var(--teal); }
-.sess-ev-detail { padding: 4px 14px 10px 36px; background: rgba(0,0,0,.18); border-top: 1px solid rgba(255,255,255,.03); }
-.inj-card { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px; }
-.inj-card + .inj-card { margin-top: 2px; }
+.sess-ev-at { font-size: 11px; color: var(--faint); width: 46px; flex: none; }
+.ev-badge { font-size: 10.5px; font-weight: 600; padding: 2px 9px; border-radius: 20px; flex: none; }
+.ev-session-start { color: var(--blue); background: rgba(90,169,255,.14); }
+.ev-user-prompt { color: var(--teal-lt); background: rgba(62,199,187,.14); }
+.sess-ev-cards { font-size: 12.5px; color: var(--tx2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-ev-grans { display: inline-flex; gap: 4px; flex: none; }
+.sess-ev-tok { font-size: 11.5px; color: var(--muted); flex: none; width: 58px; text-align: right; }
+
+/* expanded per-card breakdown, with a connecting rail */
+.sess-ev-detail { padding: 3px 15px 11px 40px; background: rgba(0,0,0,.20); position: relative; }
+.sess-ev-detail::before { content: ''; position: absolute; left: 25px; top: 0; bottom: 13px; width: 1px; background: var(--hair2); }
+.inj-card { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 7px; position: relative; }
+.inj-card + .inj-card { margin-top: 1px; }
+.inj-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint2); flex: none; margin-left: -21px; margin-right: 6px; z-index: 1; }
 .inj-card.link { cursor: pointer; }
-.inj-card.link:hover { background: rgba(62,199,187,.09); }
+.inj-card.link:hover { background: rgba(62,199,187,.08); }
+.inj-card.link:hover .inj-dot { background: var(--teal); box-shadow: 0 0 0 3px rgba(62,199,187,.14); }
 .inj-card-id { font-size: 12px; color: var(--tx2); }
 .inj-card.link:hover .inj-card-id { color: var(--teal-lt); }
-.inj-gone { font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); border: 1px solid var(--hair); border-radius: 4px; padding: 0 5px; }
-.inj-card-gran { font-size: 10.5px; color: var(--muted2); }
-.inj-card-tok { font-size: 11px; color: var(--faint); min-width: 52px; text-align: right; }
-.sess-ev-at { font-family: var(--mono); font-size: 11px; color: var(--faint); width: 52px; }
-.ev-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 5px; }
-.ev-session-start { color: var(--blue); background: rgba(90,169,255,.15); }
-.ev-user-prompt { color: var(--teal); background: rgba(62,199,187,.15); }
-.sess-ev-cards { font-size: 12.5px; color: var(--tx2); flex: 1; }
-.sess-ev-gran { font-family: var(--mono); font-size: 11px; color: var(--muted2); }
-.sess-ev-tok { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
-.sess-foot { padding: 8px 14px; font-size: 11.5px; color: var(--faint); background: rgba(255,255,255,.02); }
-.run { display: flex; align-items: center; gap: 16px; border: 1px solid var(--hair); border-radius: 10px; padding: 13px 16px; margin-bottom: 10px; background: var(--panel); }
+.inj-card-tok { font-size: 11px; color: var(--faint); min-width: 50px; text-align: right; }
+.inj-go { font-size: 13px; color: var(--teal-lt); opacity: 0; transition: opacity .12s; width: 10px; }
+.inj-card.link:hover .inj-go { opacity: 1; }
+.inj-gone { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); border: 1px solid var(--hair2); border-radius: 4px; padding: 1px 5px; width: auto; }
+.sess-foot { padding: 8px 15px; font-size: 11px; color: var(--faint); background: rgba(255,255,255,.015); border-top: 1px solid var(--hair); }
+
+.act-empty { text-align: center; padding: 60px 20px; color: var(--faint); }
+.act-empty-ic { font-size: 30px; color: var(--faint2); margin-bottom: 12px; }
+.act-empty-t { font-size: 14px; font-weight: 600; color: var(--muted); margin-bottom: 5px; }
+.act-empty-s { font-size: 12.5px; color: var(--faint); max-width: 380px; margin: 0 auto; line-height: 1.5; }
+
+.run { display: flex; align-items: center; gap: 16px; border: 1px solid var(--hair2); border-radius: 10px; padding: 13px 16px; margin-bottom: 10px; background: var(--panel); }
 .run.failed { background: rgba(255,91,82,.06); }
 .run .dot { width: 9px; height: 9px; }
-.run-date { font-family: var(--mono); font-size: 12px; color: var(--tx2); width: 130px; }
+.run-date { font-size: 12px; color: var(--tx2); width: 130px; }
 .run-detail { font-size: 12.5px; color: var(--muted); flex: 1; }
-.run-detail b { font-family: var(--mono); color: var(--tx3); }
+.run-detail b { color: var(--tx3); }
 .run-detail b.amber { color: var(--amber); }
-.run-spend { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.run-spend { font-size: 12px; color: var(--muted); }
 
 /* ---------- settings ---------- */
 .settings { padding: 20px 24px; max-width: 640px; margin: 0 auto; }

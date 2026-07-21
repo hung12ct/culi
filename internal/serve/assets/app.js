@@ -460,63 +460,108 @@ function kbDetail(filtered) {
 }
 
 // ---------- activity ----------
+// granPill renders one granularity as a color-coded chip — the same body/
+// summary/hook color language as the Overview granularity bar, so a glance
+// tells you how much of each card Claude actually saw.
+function granPill(g) {
+  const t = String(g || '').toLowerCase().replace(/[^a-z]/g, '');
+  return `<span class="gran-pill gran-${t}"><i></i>${esc(g)}</span>`;
+}
+function granPills(str) {
+  return String(str || '').split('+').filter(Boolean).map(granPill).join('');
+}
+// repoChip renders the session's repo as an unmistakable labelled chip
+// (REPO · name), or a muted "no repo logged" chip when the working dir wasn't
+// recorded (pre-repo-tracking sessions).
+function repoChip(s) {
+  if (s.repo) {
+    return `<span class="sess-repo" title="${esc(s.repoPath || s.repo)}">
+      <span class="repo-tag">repo</span><span class="repo-name">${esc(s.repo)}</span></span>`;
+  }
+  return `<span class="sess-repo unknown" title="Working directory wasn't recorded for this session (logged before repo tracking).">
+    <span class="repo-tag">repo</span><span class="repo-name">not logged</span></span>`;
+}
+
 // injCardRow renders one injected card inside an expanded event: the exact
 // card id that was applied, its granularity, and its token cost. When the card
 // still exists in the corpus (has a short id), the row deep-links to its KB
 // detail so the user can see *why* it was injected.
 function injCardRow(c) {
   const link = c.short ? `data-act="injCard:${esc(c.short)}"` : '';
-  const gone = c.short ? '' : '<span class="inj-gone" title="no longer in the knowledge base">removed</span>';
-  return `<div class="inj-card ${c.short ? 'link' : ''}" ${link}>
-    <span class="inj-card-id mono">${esc(c.id)}</span>${gone}
+  const tail = c.short
+    ? '<span class="inj-go" aria-hidden="true">→</span>'
+    : '<span class="inj-gone" title="no longer in the knowledge base">removed</span>';
+  return `<div class="inj-card ${c.short ? 'link' : ''}" ${link} ${c.short ? 'role="button" tabindex="0"' : ''}
+      title="${c.short ? 'Open ' + esc(c.id) + ' in the Knowledge Base' : ''}">
+    <span class="inj-dot"></span>
+    <span class="inj-card-id mono">${esc(c.id)}</span>
     <span class="spacer"></span>
-    <span class="inj-card-gran mono">${esc(c.gran)}</span>
+    ${granPill(c.gran)}
     <span class="inj-card-tok mono">${esc(c.tok)} tok</span>
+    ${tail}
   </div>`;
 }
 function screenActivity() {
   const inj = state.actTab === 'inj';
+  const seg = `<div class="act-top">
+    <div class="segmented">
+      <button class="seg ${inj ? 'active' : ''}" data-act="actTab:inj">Injections</button>
+      <button class="seg ${!inj ? 'active' : ''}" data-act="actTab:learn">Learning runs</button>
+    </div>
+    ${inj ? `<div class="gran-key">
+      <span class="gran-key-lbl">granularity</span>
+      <span class="gran-pill gran-body"><i></i>body</span><span class="gran-key-note">full card</span>
+      <span class="gran-pill gran-summary"><i></i>summary</span><span class="gran-key-note">~60 tok</span>
+      <span class="gran-pill gran-hook"><i></i>hook</span><span class="gran-key-note">one-liner</span>
+    </div>` : ''}
+  </div>`;
+
   let body;
   if (inj) {
     const sessions = (state.sessions || []).map((s, si) => {
+      const nEvents = (s.events || []).length;
       const events = (s.events || []).map((e, ei) => {
         const key = si + ':' + ei;
         const open = !!state.injOpen[key];
         const n = (e.list || []).length;
         const detail = open ? `<div class="sess-ev-detail">${(e.list || []).map(injCardRow).join('')}</div>` : '';
-        return `<div class="sess-ev-wrap">
+        return `<div class="sess-ev-wrap ${open ? 'open' : ''}">
           <div class="sess-ev ${open ? 'open' : ''}" data-act="injToggle:${key}" role="button" tabindex="0"
             title="${open ? 'Hide' : 'Show'} the ${n} card${n === 1 ? '' : 's'} injected here">
             <span class="sess-ev-caret">${open ? '▾' : '▸'}</span>
-            <span class="sess-ev-at">${esc(e.at)}</span>
+            <span class="sess-ev-at mono">${esc(e.at)}</span>
             <span class="ev-badge ev-${e.ev}">${esc(e.ev)}</span>
             <span class="sess-ev-cards">${esc(e.cards)}</span>
-            <span class="sess-ev-gran">${esc(e.gran)}</span><span class="sess-ev-tok">${esc(e.tok)}</span>
+            <span class="sess-ev-grans">${granPills(e.gran)}</span>
+            <span class="sess-ev-tok mono">${esc(e.tok)}</span>
           </div>${detail}</div>`;
       }).join('');
-      const repo = s.repo
-        ? `<span class="sess-repo" title="${esc(s.repoPath || s.repo)}">${esc(s.repo)}</span>`
-        : `<span class="sess-conv" title="Working directory wasn't recorded for this session (logged from older sessions before repo tracking)">conversation</span>`;
       return `<div class="sess">
-        <div class="sess-head"><span class="sess-id">${esc(s.id)}</span>${repo}
-          <span class="sess-time">${esc(s.time)}</span><span class="spacer"></span><span class="sess-tok">${esc(s.tokens)} tok</span></div>
-        <div class="sess-box">${events}<div class="sess-foot">Click a row to see exactly which cards Claude was shown.</div></div>
+        <div class="sess-head">
+          ${repoChip(s)}
+          <span class="sess-id mono" title="Claude Code conversation (session id)">${esc(s.id)}</span>
+          <span class="sess-time">${esc(s.time)}</span>
+          <span class="spacer"></span>
+          <span class="sess-nev">${nEvents} event${nEvents === 1 ? '' : 's'}</span>
+          <span class="sess-tok mono">${esc(s.tokens)} tok</span>
+        </div>
+        <div class="sess-box">${events}<div class="sess-foot">↳ click any row to see exactly which cards Claude was shown</div></div>
       </div>`;
     }).join('');
-    body = sessions || `<div class="kb-empty">No injections logged yet.</div>`;
+    body = sessions || `<div class="act-empty"><div class="act-empty-ic">◷</div>
+      <div class="act-empty-t">No injections logged yet</div>
+      <div class="act-empty-s">Work in a watched repo and culi's injections will show up here, grouped by conversation.</div></div>`;
   } else {
     const runs = (state.runs || []).map(r =>
       `<div class="run ${r.failed ? 'failed' : ''}"><span class="dot" style="background:${r.dot}"></span>
-        <span class="run-date">${esc(r.date)}</span>
+        <span class="run-date mono">${esc(r.date)}</span>
         <span class="run-detail">mined <b>${esc(r.mined)}</b> · clean <b>${esc(r.clean)}</b> · <b class="amber">${esc(r.candidates)}</b> candidates · ${esc(r.patterns)} patterns</span>
-        <span class="run-spend">${esc(r.spend)}</span></div>`).join('');
-    body = runs || `<div class="kb-empty">No learning runs yet.</div>`;
+        <span class="run-spend mono">${esc(r.spend)}</span></div>`).join('');
+    body = runs || `<div class="act-empty"><div class="act-empty-ic">◷</div>
+      <div class="act-empty-t">No learning runs yet</div>
+      <div class="act-empty-s">culi mines your transcripts after sessions end; runs and spend land here.</div></div>`;
   }
-  return `<div class="act">
-    <div class="segmented">
-      <button class="seg ${inj ? 'active' : ''}" data-act="actTab:inj">Injections</button>
-      <button class="seg ${!inj ? 'active' : ''}" data-act="actTab:learn">Learning runs</button>
-    </div>${body}</div>`;
+  return `<div class="act">${seg}${body}</div>`;
 }
 
 // ---------- settings ----------

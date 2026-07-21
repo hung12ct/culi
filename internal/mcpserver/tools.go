@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/retrieve"
@@ -117,8 +119,10 @@ type saveIn struct {
 }
 
 type saveOut struct {
-	ID   string `json:"id"`
-	Path string `json:"path"`
+	ID     string `json:"id"`
+	Path   string `json:"path"`
+	Merged bool   `json:"merged,omitempty"` // true ⇒ folded into an existing lesson, not created
+	Note   string `json:"note,omitempty"`   // human-readable outcome (what happened to the card)
 }
 
 func (s *Server) saveLesson(ctx context.Context, _ *mcp.CallToolRequest, in saveIn) (*mcp.CallToolResult, saveOut, error) {
@@ -137,6 +141,13 @@ func (s *Server) saveLesson(ctx context.Context, _ *mcp.CallToolRequest, in save
 	summary := strings.TrimSpace(in.Summary)
 	if summary == "" {
 		summary = firstLine(body)
+	}
+
+	// Smart dedup: if culi already holds a semantically-close lesson it
+	// authored, fold the new knowledge in rather than creating a duplicate.
+	// Append-only, so it never destroys the existing card (C4).
+	if out, ok := s.mergeIntoExisting(ctx, title, summary, body, scope); ok {
+		return nil, out, nil
 	}
 
 	// save_lesson is explicit user intent ⇒ instant confirm (plan §learning
@@ -177,7 +188,121 @@ func (s *Server) saveLesson(ctx context.Context, _ *mcp.CallToolRequest, in save
 
 	id := strings.TrimSuffix(filepath.ToSlash(rel), ".md")
 	_ = knowledge.Commit(kdir, "mcp: save_lesson "+id) // governance trail, best-effort
-	return nil, saveOut{ID: id, Path: abs}, nil
+	return nil, saveOut{ID: id, Path: abs, Note: "created new lesson " + id}, nil
+}
+
+// Merge thresholds: cosine at/above which an explicit save_lesson updates an
+// existing culi-authored lesson instead of creating a new card, and the lexical
+// Jaccard fallback when Ollama is down. Both sit just below the miner's dup
+// gates — explicit user intent tolerates a slightly looser match.
+const (
+	saveMergeSim = 0.90 // embed cosine
+	saveMergeJac = 0.60 // lexical fallback (matches the miner's jacDup)
+)
+
+// mergeIntoExisting folds a save_lesson into a semantically-close lesson culi
+// already authored (the "recognize it, don't duplicate" path). It is
+// append-only — existing prose is never rewritten, only extended under a dated
+// marker — so C4 holds. ok=false (no close match, or a hand-authored match that
+// must never round-trip through Render) tells the caller to create a fresh card
+// as before.
+func (s *Server) mergeIntoExisting(ctx context.Context, title, summary, body, scope string) (saveOut, bool) {
+	metas, err := s.store.AllCardsMeta(ctx)
+	if err != nil {
+		return saveOut{}, false
+	}
+	// Candidate targets: live lessons in the same scope. Never merge across
+	// scopes or into a retired card (which must not swallow its successor).
+	lessons := make([]store.StoredCard, 0)
+	for _, sc := range metas {
+		if sc.Type == "lesson" && sc.Status != "retired" && slices.Contains(sc.Scopes, scope) {
+			lessons = append(lessons, sc)
+		}
+	}
+	if len(lessons) == 0 {
+		return saveOut{}, false
+	}
+	best, sim, ok := s.closestLesson(ctx, title, summary, lessons)
+	if !ok {
+		return saveOut{}, false
+	}
+
+	kdir := config.KnowledgeDir(s.base)
+	fc, err := knowledge.ReadCard(kdir, best.Path)
+	if err != nil || !culiAuthored(fc) {
+		return saveOut{}, false // hand-authored → never rewrite (C4); create new instead
+	}
+	abs := filepath.Join(kdir, filepath.FromSlash(best.Path))
+	// Already captured verbatim: point at the existing card, change nothing.
+	if strings.Contains(fc.Body, strings.TrimSpace(body)) {
+		return saveOut{ID: best.ID, Path: abs, Merged: true, Note: "already captured in lesson " + best.ID}, true
+	}
+
+	marker := "\n\n**Update " + time.Now().UTC().Format("2006-01-02") + ":** " + strings.TrimSpace(body)
+	if err := knowledge.UpdateFile(kdir, best.Path, func(c *knowledge.Card) {
+		c.Body = strings.TrimRight(c.Body, "\n") + marker
+		c.Observations++ // reinforced by an explicit save
+	}); err != nil {
+		return saveOut{}, false
+	}
+	if _, err := indexer.Sync(ctx, s.store, kdir); err != nil {
+		return saveOut{}, false
+	}
+	ectx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, _ = indexer.EmbedMissing(ectx, s.store, s.emb, s.cfg.Ollama.Model) // best-effort re-embed
+	_ = knowledge.Commit(kdir, "mcp: save_lesson merge into "+best.ID)
+	return saveOut{ID: best.ID, Path: abs, Merged: true,
+		Note: fmt.Sprintf("merged into existing lesson %s (similarity %.2f) — no duplicate created", best.ID, sim)}, true
+}
+
+// closestLesson returns the lesson most similar to the new one, embeddings-first
+// (cosine ≥ saveMergeSim) with a lexical Jaccard fallback (≥ saveMergeJac) when
+// Ollama is down — the same primary/fallback pairing the miner's dedup uses.
+// When vectors ARE available it trusts their verdict and never falls through to
+// lexical (which would risk a looser wrong-merge).
+func (s *Server) closestLesson(ctx context.Context, title, summary string, lessons []store.StoredCard) (store.StoredCard, float64, bool) {
+	if s.emb != nil {
+		if vecs, err := s.store.Embeddings(ctx, s.cfg.Ollama.Model); err == nil && len(vecs) > 0 {
+			ectx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			qv, err := s.emb.Embed(ectx, []string{title + "\n" + summary})
+			cancel()
+			if err == nil && len(qv) == 1 {
+				best, bestSim, found := store.StoredCard{}, saveMergeSim, false
+				for _, sc := range lessons {
+					if v, ok := vecs[sc.Rowid]; ok {
+						if sim := embed.Dot(qv[0], v); sim >= bestSim {
+							bestSim, best, found = sim, sc, true
+						}
+					}
+				}
+				return best, bestSim, found
+			}
+		}
+	}
+	// Lexical fallback: term-set Jaccard over title+summary.
+	cand := retrieve.Terms(title+" "+summary, 0)
+	best, bestSim, found := store.StoredCard{}, saveMergeJac, false
+	for _, sc := range lessons {
+		if sim := retrieve.Jaccard(cand, retrieve.Terms(sc.Title+" "+sc.Summary, 0)); sim >= bestSim {
+			bestSim, best, found = sim, sc, true
+		}
+	}
+	return best, bestSim, found
+}
+
+// culiAuthored reports whether a card was written by culi (import, learning, or
+// an earlier save_lesson) and may therefore be rewritten via UpdateFile.
+// Hand-authored files never round-trip through Render (C4).
+func culiAuthored(c knowledge.Card) bool {
+	if c.Provenance == nil {
+		return false
+	}
+	switch c.Provenance.Source {
+	case "learn", "mcp", "import":
+		return true
+	}
+	return false
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
