@@ -71,6 +71,13 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 		return res, cur, fmt.Errorf("mine: %w", err)
 	}
 	next := queue.Cursor{Offset: newOff, MinedAt: time.Now().UTC()}
+	if isSelfMiningTranscript(entries) {
+		// One of culi's own `claude -p` mining calls, logged as a session and
+		// enqueued (belt-and-suspenders for the config.InternalEnv hook guard).
+		// Advance the cursor and consume the job without a model call.
+		res.Notes = append(res.Notes, "skipped culi's own mining call (self-ingestion guard)")
+		return res, next, nil
+	}
 	wins := transcript.Extract(entries)
 	res.Windows = len(wins)
 	if len(wins) == 0 {
@@ -211,6 +218,18 @@ func (m *Miner) logf(format string, args ...any) {
 	if m.Logf != nil {
 		m.Logf(format, args...)
 	}
+}
+
+// isSelfMiningTranscript reports whether entries are culi's own headless mining
+// call (its user prompt opens with the mine system prompt). Cheap string check
+// over already-parsed entries — no extra I/O.
+func isSelfMiningTranscript(entries []transcript.Entry) bool {
+	for _, e := range entries {
+		if e.Role == "user" && strings.HasPrefix(strings.TrimSpace(e.Text), selfMineSentinel) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstLine(s string) string {

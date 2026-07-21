@@ -116,6 +116,41 @@ func TestCleanSessionCostsNothing(t *testing.T) {
 	}
 }
 
+// A transcript that is one of culi's own `claude -p` mining calls (its user
+// prompt opens with the mine system prompt) must be skipped for free: no model
+// call, cursor advanced so the job drains, a note recorded.
+func TestSkipsSelfMiningTranscript(t *testing.T) {
+	cheap := &fakeGen{payload: lessonPayload}
+	m, done := newMiner(t, cheap, cheap)
+	defer done()
+
+	dir := t.TempDir()
+	content, err := json.Marshal(selfMineSentinel + " for durable knowledge...\n\nWindow 1:\nuser: do the thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := `{"type":"user","message":{"role":"user","content":` + string(content) + `}}`
+	path := filepath.Join(dir, "self.jsonl")
+	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, cur, err := m.MineSession(context.Background(), queue.Job{TranscriptPath: path}, queue.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cheap.calls != 0 {
+		t.Errorf("self-mining transcript cost %d model calls, want 0", cheap.calls)
+	}
+	if len(res.Notes) == 0 || !strings.Contains(res.Notes[0], "self-ingestion") {
+		t.Errorf("notes = %v, want a self-ingestion skip note", res.Notes)
+	}
+	st, _ := os.Stat(path)
+	if cur.Offset != st.Size() {
+		t.Errorf("cursor = %d, want %d (job must drain, not re-mine)", cur.Offset, st.Size())
+	}
+}
+
 func TestMineCreatesCandidate(t *testing.T) {
 	cheap := &fakeGen{payload: lessonPayload}
 	m, done := newMiner(t, cheap, cheap)

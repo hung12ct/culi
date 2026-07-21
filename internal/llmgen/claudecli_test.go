@@ -1,11 +1,39 @@
 package llmgen
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hung12ct/culi/internal/config"
 )
+
+// The headless `claude -p` call must carry config.InternalEnv into the
+// subprocess so its own culi hooks no-op — otherwise learning mines its own
+// mining calls. A stub claude echoes the var back through the result field.
+func TestInvokeSetsInternalEnv(t *testing.T) {
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncat >/dev/null\n" +
+		`printf '{"type":"result","is_error":false,"result":"%s","usage":{"input_tokens":1,"output_tokens":1}}\n' "$` + config.InternalEnv + "\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "claude"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	g, err := NewCLI("some-model", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := g.(*cliGen).invoke(context.Background(), "hi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Result != "1" {
+		t.Errorf("%s in subprocess = %q, want \"1\"", config.InternalEnv, res.Result)
+	}
+}
 
 func TestReadCredentialFile(t *testing.T) {
 	dir := t.TempDir()

@@ -111,6 +111,14 @@ const (
 	defaultMaxJobsPerRun  = 50 // newest transcripts mined per `culi learn` run
 )
 
+// InternalEnv marks a culi-spawned subprocess (the headless `claude -p` learning
+// calls in internal/llmgen). Those calls run under the user's Claude Code
+// settings, so they inherit culi's own hooks; the hook path checks this var and
+// no-ops for every event. Without it, each mining call would get context
+// injected into its prompt (UserPromptSubmit) and its transcript enqueued
+// (SessionEnd) — culi mining its own mining calls (self-ingestion loop).
+const InternalEnv = "CULI_INTERNAL"
+
 // BaseDir returns the culi home directory: $CULI_HOME if set, else ~/.culi.
 func BaseDir() (string, error) {
 	if dir := os.Getenv("CULI_HOME"); dir != "" {

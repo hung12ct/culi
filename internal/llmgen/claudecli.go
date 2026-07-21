@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/hung12ct/culi/internal/config"
 )
 
 // cliGen runs calls through `claude -p` (headless Claude Code) — zero API
@@ -79,6 +81,10 @@ func (g *cliGen) Generate(ctx context.Context, system, user, name string, schema
 func (g *cliGen) invoke(ctx context.Context, prompt string) (cliResult, error) {
 	var res cliResult
 	cmd := exec.CommandContext(ctx, g.bin, "-p", "--output-format", "json", "--model", g.model)
+	// This headless call runs under the user's Claude Code settings, so it fires
+	// culi's own hooks. Tag it internal so the hook path no-ops (see
+	// config.InternalEnv) — otherwise learning mines its own mining calls.
+	env := append(os.Environ(), config.InternalEnv+"=1")
 	if g.tokenFile != "" {
 		tok, err := readCredentialFile(g.tokenFile, "learn.oauth_token_file")
 		if err != nil {
@@ -86,8 +92,9 @@ func (g *cliGen) invoke(ctx context.Context, prompt string) (cliResult, error) {
 		}
 		// Appended last so it wins over any inherited (stale) value — the
 		// configured file is the authoritative account for headless learning.
-		cmd.Env = append(os.Environ(), "CLAUDE_CODE_OAUTH_TOKEN="+tok)
+		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+tok)
 	}
+	cmd.Env = env
 	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
