@@ -564,6 +564,8 @@ func (s *server) buildSettings() settingsPayload {
 		}},
 		{Title: "Learning backend", Items: []setItem{
 			{Key: "provider", Desc: "auto · anthropic · claude-cli · ollama · none", Value: c.Learn.Provider, Width: "120px"},
+			{Key: "cheap_model", Desc: "routine mining model (e.g. qwen3 for ollama)", Value: c.Learn.CheapModel, Width: "180px"},
+			{Key: "strong_model", Desc: "escalation model on schema failure", Value: c.Learn.StrongModel, Width: "180px"},
 			{Key: "oauth_token_file", Desc: "file with CLAUDE_CODE_OAUTH_TOKEN (headless subscription auth)", Value: c.Learn.OAuthTokenFile, Width: "260px"},
 			{Key: "anthropic_api_key_file", Desc: "file with ANTHROPIC_API_KEY (headless metered API)", Value: c.Learn.AnthropicAPIKeyFile, Width: "260px"},
 		}},
