@@ -28,6 +28,9 @@ func NewOpenAI(model, apiKeyFile string) (Generator, error) {
 			return nil, err
 		}
 	}
+	// key=="" relies on gopheragent's openai.New reading OPENAI_API_KEY from the
+	// env itself; if that fallback ever changes upstream this silently yields an
+	// unauthenticated provider, so keep this contract in mind when bumping the dep.
 	p, err := openai.New(key, model)
 	if err != nil {
 		return nil, fmt.Errorf("llmgen: creating openai provider: %w", err)

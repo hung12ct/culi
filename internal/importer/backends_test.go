@@ -103,6 +103,29 @@ func TestCLIMergerMissingBinary(t *testing.T) {
 	}
 }
 
+func TestCodexAndOpenAIMergerConstructors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	codexMerger, err := NewCodexCLIMerger("gpt-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := codexMerger.ModelName(); !strings.Contains(got, "codex-cli") {
+		t.Fatalf("Codex ModelName = %q", got)
+	}
+	t.Setenv("OPENAI_API_KEY", "sk-test")
+	openAIMerger, err := NewOpenAIMerger("gpt-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := openAIMerger.ModelName(); !strings.Contains(got, "openai") {
+		t.Fatalf("OpenAI ModelName = %q", got)
+	}
+}
+
 func TestOllamaMerger(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/chat" {

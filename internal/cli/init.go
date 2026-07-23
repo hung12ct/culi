@@ -85,9 +85,9 @@ ollama:
 #   - /path/to/repo-a
 #   - /path/to/repo-b
 # import:
-#   # merge backend: auto (default) picks anthropic when ANTHROPIC_API_KEY is
-#   # set, else claude-cli (your Claude subscription, no key). Also: ollama
-#   # (free, local - set merge_model to a local model like qwen3) or none.
+#   # merge backend: auto (default) detects OpenAI/Anthropic API keys, then
+#   # signed-in Claude/Codex terminals. Also: ollama (free, local - set
+#   # merge_model to a local model like qwen3) or none.
 #   provider: auto
 #   merge_model: claude-sonnet-5
 # learn:

@@ -89,13 +89,13 @@ type LearnConfig struct {
 
 // ImportConfig tunes `culi import merge`.
 type ImportConfig struct {
-	// Provider selects the merge backend: auto (default — anthropic when
-	// ANTHROPIC_API_KEY is set, else claude-cli when the claude binary is in
-	// PATH), anthropic, claude-cli, ollama, or none (mechanical only).
+	// Provider selects the merge backend: auto (default), openai, codex-cli,
+	// anthropic, claude-cli, ollama, or none (mechanical only).
 	Provider string `yaml:"provider"`
 	// MergeModel is the model used to reconcile diverged clusters and
 	// decompose CLAUDE.md files. For anthropic/claude-cli this is a Claude
-	// model ID; for ollama it MUST be a local generation model (e.g. qwen3).
+	// model ID; provider resolution replaces a model from the other vendor with
+	// a safe default. For Ollama it MUST be a local model (e.g. qwen3).
 	MergeModel string `yaml:"merge_model"`
 }
 

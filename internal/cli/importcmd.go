@@ -100,7 +100,7 @@ func importMerge(args []string) error {
 	force := fs.Bool("force", false, "overwrite an existing non-empty staging area")
 	resume := fs.Bool("resume", false, "continue an interrupted merge, skipping already-staged units")
 	noLLM := fs.Bool("no-llm", false, "mechanical merge only; skip diverged clusters and CLAUDE.md decomposition")
-	provider := fs.String("provider", "", "merge backend: auto|anthropic|claude-cli|ollama|none (default: import.provider)")
+	provider := fs.String("provider", "", "merge backend: auto|codex-cli|openai|anthropic|claude-cli|ollama|none (default: import.provider)")
 	model := fs.String("model", "", "override import.merge_model")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
@@ -211,19 +211,38 @@ func resolveMerger(provider, model, ollamaEndpoint string) (importer.Merger, str
 		return nil, "mechanical only (diverged clusters and CLAUDE.md left for a later run)", nil
 	case "anthropic":
 		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			return nil, "", fmt.Errorf("cli: provider anthropic needs ANTHROPIC_API_KEY (or use --provider claude-cli / ollama)")
+			return nil, "", fmt.Errorf("cli: provider anthropic needs ANTHROPIC_API_KEY (or use --provider codex-cli / claude-cli / openai / ollama)")
 		}
+		model = importProviderModel(provider, model)
 		m, err := importer.NewLLMMerger(model)
 		if err != nil {
 			return nil, "", err
 		}
 		return m, model + " via Anthropic API", nil
 	case "claude-cli":
+		model = importProviderModel(provider, model)
 		m, err := importer.NewCLIMerger(model)
 		if err != nil {
 			return nil, "", err
 		}
 		return m, model + " via claude CLI (uses your Claude subscription, no API key)", nil
+	case "openai":
+		if os.Getenv("OPENAI_API_KEY") == "" {
+			return nil, "", fmt.Errorf("cli: provider openai needs OPENAI_API_KEY (or use --provider codex-cli / ollama)")
+		}
+		model = importProviderModel(provider, model)
+		m, err := importer.NewOpenAIMerger(model)
+		if err != nil {
+			return nil, "", err
+		}
+		return m, model + " via OpenAI API", nil
+	case "codex-cli":
+		model = importProviderModel(provider, model)
+		m, err := importer.NewCodexCLIMerger(model)
+		if err != nil {
+			return nil, "", err
+		}
+		return m, model + " via Codex CLI (uses your existing Codex login)", nil
 	case "ollama":
 		if strings.HasPrefix(model, "claude") {
 			return nil, "", fmt.Errorf("cli: provider ollama needs a local generation model — set import.merge_model (e.g. qwen3), not %q", model)
@@ -231,18 +250,45 @@ func resolveMerger(provider, model, ollamaEndpoint string) (importer.Merger, str
 		return importer.NewOllamaMerger(ollamaEndpoint, model), model + " via local Ollama (free)", nil
 	case "auto", "":
 		if os.Getenv("ANTHROPIC_API_KEY") != "" {
-			if m, err := importer.NewLLMMerger(model); err == nil {
-				return m, model + " via Anthropic API (auto)", nil
+			anthropicModel := importProviderModel("anthropic", model)
+			if m, err := importer.NewLLMMerger(anthropicModel); err == nil {
+				return m, anthropicModel + " via Anthropic API (auto)", nil
 			}
 		}
-		if m, err := importer.NewCLIMerger(model); err == nil {
-			return m, model + " via claude CLI (auto — uses your Claude subscription)", nil
+		if os.Getenv("OPENAI_API_KEY") != "" {
+			openAIModel := importProviderModel("openai", model)
+			if m, err := importer.NewOpenAIMerger(openAIModel); err == nil {
+				return m, openAIModel + " via OpenAI API (auto)", nil
+			}
 		}
-		return nil, "mechanical only — no backend found. Options: set ANTHROPIC_API_KEY, " +
-			"install the claude CLI, or set import.provider: ollama with a local model", nil
+		claudeModel := importProviderModel("claude-cli", model)
+		if m, err := importer.NewCLIMerger(claudeModel); err == nil {
+			return m, claudeModel + " via claude CLI (auto — uses your Claude subscription)", nil
+		}
+		codexModel := importProviderModel("codex-cli", model)
+		if m, err := importer.NewCodexCLIMerger(codexModel); err == nil {
+			return m, codexModel + " via Codex CLI (auto — uses your existing login)", nil
+		}
+		return nil, "mechanical only — no backend found. Sign in to Codex/Claude CLI, set " +
+			"OPENAI_API_KEY/ANTHROPIC_API_KEY, or set import.provider: ollama with a local model", nil
 	default:
-		return nil, "", fmt.Errorf("cli: unknown merge provider %q (want auto|anthropic|claude-cli|ollama|none)", provider)
+		return nil, "", fmt.Errorf("cli: unknown merge provider %q (want auto|codex-cli|openai|anthropic|claude-cli|ollama|none)", provider)
 	}
+}
+
+// importProviderModel guards against shipping a stale cross-vendor model ID to
+// the wrong backend. It only remaps on a claude/gpt- prefix mismatch: a model
+// that is neither (e.g. an Ollama name like "qwen3" left in config while
+// --provider openai is selected) passes through unremapped — best-effort by
+// design, treated as user misconfiguration the backend will reject.
+func importProviderModel(provider, model string) string {
+	openAIProvider := provider == "openai" || provider == "codex-cli"
+	claudeProvider := provider == "anthropic" || provider == "claude-cli"
+	if (openAIProvider && strings.HasPrefix(model, "claude")) ||
+		(claudeProvider && strings.HasPrefix(model, "gpt-")) {
+		_, model = config.RecommendedLearnModels(provider)
+	}
+	return model
 }
 
 // loadBase resolves the culi home and its config in one step.
