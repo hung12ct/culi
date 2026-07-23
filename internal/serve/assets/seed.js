@@ -91,7 +91,7 @@ const SEED = {
     ];
   })(),
   sessions: [
-    { id: 'sess-3f9a', repo: 'phin', time: 'today 10:42', tokens: '1,204', events: [
+    { id: 'sess-3f9a', repo: 'phin', harness: 'claude', time: 'today 10:42', tokens: '1,204', events: [
       { at: '10:42', ev: 'session-start', cards: '5 baseline cards', gran: 'summary', tok: '612 tok', list: [
         { id: 'rules/go-error-wrapping', short: 'e7a1', gran: 'summary', tok: 58 },
         { id: 'rules/ctx-first', short: 'b2c4', gran: 'summary', tok: 44 },
@@ -105,11 +105,11 @@ const SEED = {
         { id: 'rules/phin-fmt', short: 'd4e9', gran: 'body', tok: 372 },
         { id: 'styles/go-naming', short: 'aa02', gran: 'hook', tok: 16 },
         { id: 'rules/removed-card', short: '', gran: 'hook', tok: 16 }] }] },
-    { id: 'sess-2b71', repo: 'cutpilot', time: 'today 09:15', tokens: '806', events: [
+    { id: 'sess-2b71', repo: 'cutpilot', harness: 'codex', time: 'today 09:15', tokens: '806', events: [
       { at: '09:15', ev: 'session-start', cards: '5 baseline cards', gran: 'summary', tok: '598 tok', list: [] },
       { at: '09:22', ev: 'user-prompt', cards: 'patterns/debounce-cursor', gran: 'hook', tok: '208 tok', list: [
         { id: 'patterns/debounce-cursor', short: 'a920', gran: 'hook', tok: 18 }] }] },
-    { id: 'sess-1c40', repo: 'phin', time: 'yesterday 16:30', tokens: '1,533', events: [
+    { id: 'sess-1c40', repo: 'phin', harness: 'claude', time: 'yesterday 16:30', tokens: '1,533', events: [
       { at: '16:30', ev: 'session-start', cards: '5 baseline cards', gran: 'summary', tok: '605 tok', list: [] },
       { at: '16:41', ev: 'user-prompt', cards: 'skills/git-worktree, agents/reviewer', gran: 'body', tok: '928 tok', list: [
         { id: 'skills/git-worktree', short: '3b1f', gran: 'body', tok: 540 },

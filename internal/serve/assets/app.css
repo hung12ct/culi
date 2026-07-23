@@ -465,6 +465,9 @@ input:focus, textarea:focus { outline: none; }
 .sess-repo.unknown .repo-tag { color: var(--faint); background: rgba(255,255,255,.05); }
 .sess-repo.unknown .repo-name { color: var(--faint); font-weight: 500; font-style: italic; }
 .sess-id { font-size: 11px; color: var(--faint); }
+.harness-badge { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; padding: 3px 7px; border-radius: 6px; flex: none; border: 1px solid var(--hair2); color: var(--faint); background: rgba(255,255,255,.03); }
+.harness-badge.harness-codex { color: var(--blue); border-color: rgba(90,169,255,.30); background: rgba(90,169,255,.10); }
+.harness-badge.harness-claude { color: var(--teal-lt); border-color: rgba(62,199,187,.30); background: rgba(62,199,187,.08); }
 .sess-time { font-size: 11.5px; color: var(--faint2); }
 .sess-nev { font-size: 10.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; }
 .sess-tok { font-size: 11.5px; color: var(--teal-lt); background: rgba(62,199,187,.08); padding: 2px 8px; border-radius: 5px; }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/learn/mine"
@@ -88,7 +89,17 @@ func (s *server) handleCard(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleInjections(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	s.writeJSON(w, http.StatusOK, s.buildSessions(r.Context(), q.Get("repo"), sinceCutoff(q.Get("since"))))
+	s.writeJSON(w, http.StatusOK, s.buildSessions(r.Context(), q.Get("repo"), harnessFilter(q.Get("harness")), sinceCutoff(q.Get("since"))))
+}
+
+// harnessFilter validates the harness query param: a known harness passes
+// through as its code; anything else (including "all"/unset/garbage) becomes
+// "all" so a stray value never silently hides every session.
+func harnessFilter(v string) string {
+	if h, ok := harness.Parse(v); ok {
+		return h.String()
+	}
+	return "all"
 }
 
 // sinceCutoff maps a date-filter preset to an absolute cutoff; a zero time

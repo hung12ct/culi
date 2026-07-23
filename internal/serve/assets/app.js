@@ -66,8 +66,10 @@ const state = {
   returnTo: null,     // screen to offer a "← back" link to after an Overview drill-down
   actTab: 'inj',
   actRepo: '',        // Activity: repo filter ('' = all repos)
+  actHarness: '',     // Activity: harness filter ('' = all harnesses)
   actSince: 'all',    // Activity: date filter (all | today | 7d | 30d)
   actRepos: [],       // repo labels seen in the recent window (filter dropdown options)
+  actHarnesses: [],   // [{code,label}] harnesses seen in the recent window (filter options)
   injOpen: {}, // keyed "si:ei" — which injection events are expanded
   toast: null,
   undoStack: null,
@@ -95,10 +97,19 @@ async function loadCard(id)    { try { return await api('/api/cards/' + encodeUR
 async function loadSessions()  {
   const q = new URLSearchParams();
   if (state.actRepo) q.set('repo', state.actRepo);
+  if (state.actHarness) q.set('harness', state.actHarness);
   if (state.actSince && state.actSince !== 'all') q.set('since', state.actSince);
   const qs = q.toString();
   try { return await api('/api/activity/injections' + (qs ? '?' + qs : '')); }
-  catch { return { sessions: SEED.sessions, repos: [] }; }
+  catch {
+    // Offline demo only (no server): derive harness options from the seed data
+    // so the dropdown never lists an agent absent from the shown sessions. The
+    // live path always gets server-authored labels; this map is the sole
+    // exception, unavoidable without a backend.
+    const labels = { claude: 'Claude Code', codex: 'Codex CLI' };
+    const codes = [...new Set((SEED.sessions || []).map(s => s.harness).filter(Boolean))];
+    return { sessions: SEED.sessions, repos: [], harnesses: codes.map(c => ({ code: c, label: labels[c] || c })) };
+  }
 }
 async function loadRuns()      { try { return await api('/api/activity/runs'); } catch { return SEED.runs; } }
 async function loadSettings()  { try { return await api('/api/config'); }     catch { return SEED.settings; } }
@@ -540,15 +551,32 @@ function injCardRow(c) {
     ${tail}
   </div>`;
 }
+// harnessLabel maps a harness code to its human label using the option list the
+// server sent (labels are authored in the harness package, never here).
+function harnessLabel(code) {
+  if (!code) return '';
+  const opt = (state.actHarnesses || []).find(h => h.code === code);
+  return opt ? opt.label : code;
+}
 function activityFilters() {
   const repoOpts = ['<option value="">All repos</option>'].concat(
     (state.actRepos || []).map(r => `<option value="${esc(r)}"${state.actRepo === r ? ' selected' : ''}>${esc(r)}</option>`)
   ).join('');
+  // Only surface the harness filter once more than one agent has been seen —
+  // single-agent users never meet a control they cannot use.
+  let harnessSel = '';
+  if ((state.actHarnesses || []).length > 1) {
+    const opts = ['<option value="">All agents</option>'].concat(
+      state.actHarnesses.map(h => `<option value="${esc(h.code)}"${state.actHarness === h.code ? ' selected' : ''}>${esc(h.label)}</option>`)
+    ).join('');
+    harnessSel = `<select class="act-sel mono" data-change="actHarness" title="Filter by coding agent">${opts}</select>`;
+  }
   const dates = [['all', 'All'], ['today', 'Today'], ['7d', '7d'], ['30d', '30d']];
   const dateSeg = dates.map(([v, l]) =>
     `<button class="seg ${state.actSince === v ? 'active' : ''}" data-act="actSince:${v}">${esc(l)}</button>`).join('');
   return `<div class="act-filters">
     <select class="act-sel mono" data-change="actRepo" title="Filter by repository">${repoOpts}</select>
+    ${harnessSel}
     <div class="segmented sm" title="Filter by time">${dateSeg}</div>
   </div>`;
 }
@@ -570,7 +598,7 @@ function screenActivity() {
 
   let body;
   if (inj) {
-    const filtering = !!state.actRepo || (state.actSince && state.actSince !== 'all');
+    const filtering = !!state.actRepo || !!state.actHarness || (state.actSince && state.actSince !== 'all');
     const sessions = (state.sessions || []).map((s, si) => {
       const nEvents = (s.events || []).length;
       const events = (s.events || []).map((e, ei) => {
@@ -589,16 +617,22 @@ function screenActivity() {
             <span class="sess-ev-tok mono">${esc(e.tok)}</span>
           </div>${detail}</div>`;
       }).join('');
+      const hLabel = harnessLabel(s.harness);
+      const hBadge = hLabel
+        ? `<span class="harness-badge harness-${esc(s.harness)}" title="Injected into ${esc(hLabel)}">${esc(hLabel)}</span>`
+        : '';
+      const idTitle = hLabel ? esc(hLabel) + ' conversation (session id)' : 'conversation (session id)';
       return `<div class="sess">
         <div class="sess-head">
           ${repoChip(s)}
-          <span class="sess-id mono" title="Claude Code conversation (session id)">${esc(s.id)}</span>
+          ${hBadge}
+          <span class="sess-id mono" title="${idTitle}">${esc(s.id)}</span>
           <span class="sess-time">${esc(s.time)}</span>
           <span class="spacer"></span>
           <span class="sess-nev">${nEvents} event${nEvents === 1 ? '' : 's'}</span>
           <span class="sess-tok mono">${esc(s.tokens)} tok</span>
         </div>
-        <div class="sess-box">${events}<div class="sess-foot">↳ click any row to see exactly which cards Claude was shown</div></div>
+        <div class="sess-box">${events}<div class="sess-foot">↳ click any row to see exactly which cards the agent was shown</div></div>
       </div>`;
     }).join('');
     body = sessions || (filtering
@@ -659,11 +693,12 @@ async function ensure(screen) {
   if (screen === 'activity') {
     if (!state.sessions) {
       const r = await loadSessions();
-      const obj = Array.isArray(r) ? { sessions: r, repos: [] } : (r || {});
+      const obj = Array.isArray(r) ? { sessions: r, repos: [], harnesses: [] } : (r || {});
       state.sessions = obj.sessions || [];
-      // Keep the last non-empty repo list so the dropdown never blanks out when a
-      // filter narrows the result set (the server returns the full list anyway).
+      // Keep the last non-empty option lists so the dropdowns never blank out when
+      // a filter narrows the result set (the server returns the full list anyway).
       if (obj.repos && obj.repos.length) state.actRepos = obj.repos;
+      if (obj.harnesses && obj.harnesses.length) state.actHarnesses = obj.harnesses;
       state.injOpen = {};
     }
     if (!state.runs) state.runs = await loadRuns();
@@ -884,6 +919,7 @@ async function reloadSessions() {
 // the counterpart to click-based data-act handling.
 function handleChange(name, value) {
   if (name === 'actRepo') { state.actRepo = value; reloadSessions(); }
+  else if (name === 'actHarness') { state.actHarness = value; reloadSessions(); }
 }
 
 // refresh re-fetches the live data for the current screen (the dashboard is a

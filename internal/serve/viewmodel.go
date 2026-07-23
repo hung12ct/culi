@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/learn/llmtier"
 	"github.com/hung12ct/culi/internal/store"
@@ -160,17 +161,27 @@ type sessionPayload struct {
 	ID       string         `json:"id"`
 	Repo     string         `json:"repo"`     // basename of the working dir ("" when unknown)
 	RepoPath string         `json:"repoPath"` // full cwd, for the tooltip
+	Harness  string         `json:"harness"`  // source-agent code: claude | codex
 	Time     string         `json:"time"`
 	Tokens   string         `json:"tokens"`
 	Events   []sessionEvent `json:"events"`
 }
 
+// harnessOpt is one source-agent filter option: the wire code (matches the
+// query param) plus its human label. Labels come from the harness package so
+// the UI never hardcodes them.
+type harnessOpt struct {
+	Code  string `json:"code"`
+	Label string `json:"label"`
+}
+
 // injectionsPayload wraps the Activity injections list with the distinct repo
-// labels present in the recent window, so the client can render a repo filter
-// whose options stay stable regardless of the active filter.
+// labels and harness options present in the recent window, so the client can
+// render filters whose options stay stable regardless of the active filter.
 type injectionsPayload struct {
-	Repos    []string         `json:"repos"`
-	Sessions []sessionPayload `json:"sessions"`
+	Repos     []string         `json:"repos"`
+	Harnesses []harnessOpt     `json:"harnesses"`
+	Sessions  []sessionPayload `json:"sessions"`
 }
 
 type runPayload struct {
@@ -471,7 +482,7 @@ func (s *server) buildCardDetail(ctx context.Context, id string) (cardDetailPayl
 // Repos is the full distinct repo list across the recent window — computed
 // before filtering so the client's dropdown stays stable. All local and off the
 // hook hot path: a scan of ≤500 in-memory rows, no extra query.
-func (s *server) buildSessions(ctx context.Context, repoFilter string, since time.Time) injectionsPayload {
+func (s *server) buildSessions(ctx context.Context, repoFilter, harnessFilter string, since time.Time) injectionsPayload {
 	rows, _ := s.store.RecentInjections(ctx, 500)
 	// Map full card id → short id so each injected card can deep-link into the KB.
 	metas, _ := s.store.AllCardsMeta(ctx)
@@ -479,17 +490,25 @@ func (s *server) buildSessions(ctx context.Context, repoFilter string, since tim
 	for _, m := range metas {
 		idToShort[m.ID] = m.ShortID
 	}
-	// Distinct repos across the whole recent window (dropdown options), and the
-	// row filter, in one pass. "all"/"" repoFilter means no repo constraint.
+	// Distinct repos + harnesses across the whole recent window (stable dropdown
+	// options), and the row filters, in one pass. "all"/"" means no constraint.
 	repoSet := map[string]struct{}{}
+	harnessSet := map[string]struct{}{}
 	wantRepo := repoFilter != "" && repoFilter != "all"
+	wantHarness := harnessFilter != "" && harnessFilter != "all"
 	kept := make([]store.InjectionRow, 0, len(rows))
 	for _, r := range rows {
 		lbl := repoLabel(r.Cwd)
 		if lbl != "" {
 			repoSet[lbl] = struct{}{}
 		}
+		if r.Harness != "" {
+			harnessSet[r.Harness] = struct{}{}
+		}
 		if wantRepo && lbl != repoFilter {
+			continue
+		}
+		if wantHarness && r.Harness != harnessFilter {
 			continue
 		}
 		if !since.IsZero() {
@@ -504,6 +523,7 @@ func (s *server) buildSessions(ctx context.Context, repoFilter string, since tim
 		repos = append(repos, r)
 	}
 	sort.Strings(repos)
+	harnesses := harnessOptions(harnessSet)
 
 	var order []string
 	groups := map[string][]store.InjectionRow{}
@@ -553,12 +573,44 @@ func (s *server) buildSessions(ctx context.Context, repoFilter string, since tim
 			ID:       shortSession(sid),
 			Repo:     repoLabel(cwd),
 			RepoPath: cwd,
+			Harness:  sessionHarness(rs),
 			Time:     humanizeTime(rs[len(rs)-1].TS),
 			Tokens:   commas(total),
 			Events:   events,
 		})
 	}
-	return injectionsPayload{Repos: repos, Sessions: out}
+	return injectionsPayload{Repos: repos, Harnesses: harnesses, Sessions: out}
+}
+
+// sessionHarness returns the source-agent code for a session's rows. Rows in
+// one session share a harness (the id is prefixed with it), so the first
+// non-empty value wins.
+func sessionHarness(rs []store.InjectionRow) string {
+	for _, r := range rs {
+		if r.Harness != "" {
+			return r.Harness
+		}
+	}
+	return ""
+}
+
+// harnessOptions turns the set of harness codes present into sorted filter
+// options, labeled by the harness package (unknown codes fall back to raw).
+func harnessOptions(set map[string]struct{}) []harnessOpt {
+	codes := make([]string, 0, len(set))
+	for c := range set {
+		codes = append(codes, c)
+	}
+	sort.Strings(codes)
+	opts := make([]harnessOpt, 0, len(codes))
+	for _, c := range codes {
+		label := c
+		if h, ok := harness.Parse(c); ok {
+			label = h.Label()
+		}
+		opts = append(opts, harnessOpt{Code: c, Label: label})
+	}
+	return opts
 }
 
 func (s *server) buildRuns() []runPayload {
