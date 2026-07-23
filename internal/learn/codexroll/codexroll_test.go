@@ -36,9 +36,13 @@ func TestReadFromMessagesAndNoise(t *testing.T) {
 	}
 }
 
-func TestSkipsSyntheticEnvironmentContext(t *testing.T) {
+func TestSkipsSyntheticHarnessEnvelopes(t *testing.T) {
+	// Both are Codex-injected synthetic "user" turns seen in real v0.145
+	// rollouts; only the genuine prompt must survive. The recommended_plugins
+	// block also carries trailing text, exercising the prefix match.
 	path := writeRollout(t,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n<cwd>/secret/repo</cwd>\n</environment_context>"}]}}`,
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins> Here is a list of plugins that are available but not installed. - A"}]}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"fix the retry bug"}]}}`,
 	)
 	entries, _, err := ReadFrom(path, 0)

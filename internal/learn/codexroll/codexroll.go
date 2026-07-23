@@ -90,9 +90,10 @@ func parseLine(raw []byte) (transcript.Entry, bool) {
 			return transcript.Entry{}, false
 		}
 		text := strings.Join(texts, "\n")
-		// Codex records its synthetic workspace envelope as a user message.
-		// It is harness state, not user intent, and mining it would teach Culi
-		// filesystem/sandbox metadata as if it were a reusable lesson.
+		// Codex injects synthetic "user" messages (sandbox/cwd state, the
+		// plugin catalog, …) that are harness state, not user intent. Mining
+		// them would teach Culi environment metadata as if it were a reusable
+		// lesson, so drop any user turn that opens with a known envelope tag.
 		if rl.Payload.Role == "user" && isHarnessEnvelope(text) {
 			return transcript.Entry{}, false
 		}
@@ -110,10 +111,24 @@ func parseLine(raw []byte) (transcript.Entry, bool) {
 	return transcript.Entry{}, false
 }
 
+// codexHarnessEnvelopes are the opening tags of Codex-injected synthetic
+// "user" messages observed in real rollouts (Codex v0.145). A prefix match is
+// deliberate: Codex may append trailing text after the block, and a real user
+// prompt is extraordinarily unlikely to open with one of these exact tags.
+// Extend this list as new envelopes surface in the wild.
+var codexHarnessEnvelopes = []string{
+	"<environment_context>",
+	"<recommended_plugins>",
+}
+
 func isHarnessEnvelope(text string) bool {
 	trimmed := strings.TrimSpace(text)
-	return strings.HasPrefix(trimmed, "<environment_context>") &&
-		strings.HasSuffix(trimmed, "</environment_context>")
+	for _, tag := range codexHarnessEnvelopes {
+		if strings.HasPrefix(trimmed, tag) {
+			return true
+		}
+	}
+	return false
 }
 
 func outputText(raw json.RawMessage) string {
