@@ -29,6 +29,7 @@ Usage:
   culi review [--list]          approve/reject mined candidate cards
   culi gen [--repo X] [--target claude|codex|both]  git history → instructions + repo cards
   culi stats [--json]           token accounting, gate economics, learning spend
+  culi doctor [--harness=codex] verify local harness wiring and recent activity
   culi serve [--addr host:port] local web review console (default localhost:7378)
   culi statusline               Claude Code statusLine segment (stdin JSON; internal)
   culi version                  print the running build's version + git commit
@@ -67,6 +68,8 @@ func main() {
 		exit(cli.Gen(os.Args[2:]))
 	case "stats":
 		exit(cli.Stats(os.Args[2:]))
+	case "doctor":
+		exit(cli.Doctor(os.Args[2:]))
 	case "serve":
 		exit(cli.Serve(os.Args[2:]))
 	case "statusline":

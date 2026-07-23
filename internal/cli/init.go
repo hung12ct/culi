@@ -422,8 +422,12 @@ func registerHooksCodex() (changed bool, err error) {
 		{"SessionStart", "session-start", 10},
 		{"UserPromptSubmit", "user-prompt-submit", 10},
 		{"Stop", "stop", 30},
-		{"SessionEnd", "session-end", 30},
+		{"SessionEnd", "session-end", 3},
 	} {
+		if reconcileCuliHookTimeout(hooks[ev.name], ev.timeout) {
+			changed = true
+			continue
+		}
 		if hasCuliHook(hooks[ev.name]) {
 			continue
 		}
@@ -451,6 +455,30 @@ func registerHooksCodex() (changed bool, err error) {
 	}
 	fmt.Println("hooks:    Codex requires review — open a new session and run `/hooks` to trust culi")
 	return true, nil
+}
+
+// reconcileCuliHookTimeout updates only Culi-owned commands. This lets a
+// later `culi init` repair old generated settings without touching neighboring
+// hooks or requiring users to delete hooks.json.
+func reconcileCuliHookTimeout(v any, timeout float64) bool {
+	groups, _ := v.([]any)
+	for _, g := range groups {
+		gm, _ := g.(map[string]any)
+		inner, _ := gm["hooks"].([]any)
+		for _, h := range inner {
+			hm, _ := h.(map[string]any)
+			cmd, _ := hm["command"].(string)
+			if !strings.Contains(cmd, " hook ") || !strings.Contains(cmd, "--harness=codex") {
+				continue
+			}
+			if current, ok := hm["timeout"].(float64); ok && current == timeout {
+				return false
+			}
+			hm["timeout"] = timeout
+			return true
+		}
+	}
+	return false
 }
 
 func atomicWriteJSON(path string, v any, pattern string) error {

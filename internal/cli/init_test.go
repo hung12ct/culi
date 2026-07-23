@@ -36,6 +36,9 @@ func TestRegisterHooksCodexShapeAndIdempotency(t *testing.T) {
 	if !strings.Contains(string(raw), "--harness=codex") {
 		t.Error("Codex adapter identity missing")
 	}
+	if got := culiHookTimeout(hooks["SessionEnd"]); got != 3 {
+		t.Errorf("SessionEnd timeout = %v, want 3", got)
+	}
 	backup, err := os.ReadFile(filepath.Join(home, "hooks.json.culi-backup"))
 	if err != nil || string(backup) != original {
 		t.Errorf("backup=%q err=%v", backup, err)
@@ -43,6 +46,34 @@ func TestRegisterHooksCodexShapeAndIdempotency(t *testing.T) {
 	changed, err = registerHooksCodex()
 	if err != nil || changed {
 		t.Fatalf("second changed=%v err=%v", changed, err)
+	}
+}
+
+func TestRegisterHooksCodexRepairsOldSessionEndTimeout(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	old := `{"hooks":{"SessionEnd":[{"hooks":[
+{"type":"command","command":"/bin/culi hook session-end --harness=codex","timeout":30},
+{"type":"command","command":"keep-me","timeout":19}
+]}]}}`
+	if err := os.WriteFile(filepath.Join(home, "hooks.json"), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := registerHooksCodex()
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	raw, _ := os.ReadFile(filepath.Join(home, "hooks.json"))
+	var root map[string]any
+	if err := json.Unmarshal(raw, &root); err != nil {
+		t.Fatal(err)
+	}
+	hooks := root["hooks"].(map[string]any)
+	if got := culiHookTimeout(hooks["SessionEnd"]); got != 3 {
+		t.Fatalf("SessionEnd timeout = %v, want 3", got)
+	}
+	if !strings.Contains(string(raw), `"command": "keep-me"`) || !strings.Contains(string(raw), `"timeout": 19`) {
+		t.Fatalf("unrelated hook changed: %s", raw)
 	}
 }
 

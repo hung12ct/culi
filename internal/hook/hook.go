@@ -52,7 +52,10 @@ type specificShim struct {
 const (
 	promptDeadline  = 150 * time.Millisecond
 	sessionDeadline = 5 * time.Second
-	maxOutputChars  = 10000 // conservative shared guard (~Codex's 2,500-token spill threshold)
+	// Codex clamps SessionEnd hooks to 3s. Keep Culi's own deadline below
+	// that outer ceiling so fail-open cleanup and diagnostics can finish.
+	sessionEndDeadline = 2500 * time.Millisecond
+	maxOutputChars     = 10000 // conservative shared guard (~Codex's 2,500-token spill threshold)
 )
 
 // Run executes one hook event, reading stdin JSON from in and writing the
@@ -117,6 +120,9 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 	input.Harness = harness
 	if input.SessionID != "" {
 		input.SessionID = harness + ":" + input.SessionID
+	}
+	if event == "session-end" && harness == "codex" {
+		deadline = sessionEndDeadline
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)

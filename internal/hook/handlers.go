@@ -132,6 +132,7 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 
 	// Resume keeps dedup state; re-injecting the baseline would duplicate.
 	if in.Source == "resume" {
+		lifecycleLog(base, in, "session-start", "ok source=resume")
 		return "", nil
 	}
 
@@ -142,6 +143,7 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 		return "", err
 	}
 	if len(cands) == 0 {
+		lifecycleLog(base, in, "session-start", "ok source="+eventSource(in.Source))
 		return coverageNote(ctx, s, sc), nil
 	}
 	injected, err := s.InjectedLevels(ctx, in.SessionID)
@@ -156,11 +158,13 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 		return "", err
 	}
 	if len(inj.Items) == 0 {
+		lifecycleLog(base, in, "session-start", "ok source="+eventSource(in.Source))
 		return coverageNote(ctx, s, sc), nil
 	}
 	if err := s.RecordInjections(ctx, in.SessionID, "session-start", "", in.CWD, inj.Records()); err != nil {
 		return "", err
 	}
+	lifecycleLog(base, in, "session-start", "ok source="+eventSource(in.Source))
 	return inj.RenderWith(pack.PointerHeader), nil
 }
 
@@ -209,6 +213,7 @@ func handleSessionEnd(ctx context.Context, base string, in Input) error {
 // it; SessionEnd marks the final, unthrottled flush.
 func enqueueTranscript(base string, in Input, trigger string) error {
 	if in.TranscriptPath == "" {
+		lifecycleLog(base, in, trigger, "skip=no-transcript")
 		return nil
 	}
 	dir := config.InboxDir(base)
@@ -231,8 +236,31 @@ func enqueueTranscript(base string, in Input, trigger string) error {
 	if err := os.WriteFile(name, raw, 0o644); err != nil {
 		return fmt.Errorf("hook: writing job: %w", err)
 	}
+	lifecycleLog(base, in, trigger, "queued")
 	spawnLearnWorker(base)
 	return nil
+}
+
+// lifecycleLog keeps Codex integration observable without recording prompts,
+// transcript paths, or other conversation content. Claude retains its older,
+// quieter behavior for compatibility; its lifecycle can be added later with
+// the same explicit harness prefix.
+func lifecycleLog(base string, in Input, event, result string) {
+	if in.Harness != "codex" {
+		return
+	}
+	session := in.SessionID
+	if session == "" {
+		session = "codex:<missing>"
+	}
+	logf(base, "hook %s %s session=%s", event, result, session)
+}
+
+func eventSource(source string) string {
+	if source == "" {
+		return "unknown"
+	}
+	return source
 }
 
 // spawnLearnWorker starts `culi learn --auto` detached: mining never runs in

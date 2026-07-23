@@ -214,6 +214,7 @@ learn:
 | Command | What it does |
 |---|---|
 | `culi init [--harness=auto\|claude\|codex\|all]` | Set up `~/.culi`, register selected hooks + MCP |
+| `culi doctor [--harness=codex]` | Verify Codex hooks/MCP, timeout alignment, recent activity, and pending learning |
 | `culi serve` | Local web review console (default `localhost:7378`) |
 | `culi query <text>` | Debug retrieval from the terminal |
 | `culi stats` | Token accounting, gate economics, learning spend |

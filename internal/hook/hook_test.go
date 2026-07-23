@@ -238,6 +238,23 @@ func TestCodexStopEnqueuesPeriodicJob(t *testing.T) {
 		!strings.Contains(string(job), `"session_id":"codex:s-stop"`) {
 		t.Errorf("job=%s", job)
 	}
+	log, _ := os.ReadFile(filepath.Join(base, "logs", "hook.log"))
+	if !strings.Contains(string(log), "hook stop queued session=codex:s-stop") {
+		t.Errorf("Codex lifecycle breadcrumb missing: %s", log)
+	}
+}
+
+func TestCodexMissingTranscriptIsObservable(t *testing.T) {
+	base := sandbox(t)
+	raw, _ := json.Marshal(Input{SessionID: "s-empty", CWD: "/tmp"})
+	var out bytes.Buffer
+	if code := Run([]string{"stop", "--harness=codex"}, strings.NewReader(string(raw)), &out); code != 0 || out.Len() != 0 {
+		t.Fatalf("code=%d out=%q", code, out.String())
+	}
+	log, _ := os.ReadFile(filepath.Join(base, "logs", "hook.log"))
+	if !strings.Contains(string(log), "hook stop skip=no-transcript session=codex:s-empty") {
+		t.Errorf("missing-transcript breadcrumb missing: %s", log)
+	}
 }
 
 // Inside culi's own headless `claude -p` learning calls (CULI_INTERNAL set),
