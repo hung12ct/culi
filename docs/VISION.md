@@ -23,20 +23,23 @@ inspectable and reversible.
 
 ### Now — trustworthy daily control
 
-- Health and next actions on Home.
-- Fast evidence-first review of proposed lessons.
-- Searchable knowledge maintenance and per-session delivery traces.
-- Responsive, keyboard-accessible operation.
+- Health, real review counts, savings, and next actions on Home.
+- Fast evidence-first review of proposed lessons with keyboard navigation and undo.
+- Searchable knowledge maintenance plus Knowledge Pulse delivery analytics by card, harness, and repository.
+- Per-session activity filters for Claude/Codex, repository, and date range.
+- Safe learning-provider/model/cap controls, watched-repository management, and visible backend readiness.
+- Responsive light and dark themes with local preference storage.
+- Codex-native learning, read-only rollout recovery, and CLI scanner health diagnostics.
 
 ### Next — guided setup and diagnosis
 
 - A first-run checklist for harness hooks, MCP, learning backend, and history backfill.
 - Harness health inside the console using the same facts as `culi doctor`.
 - Clear learning backlog controls: scan, run, retry, and inspect failures.
+- Explain the retrieval reasons and granularity chosen for an individual delivery.
 
 ### Later — quality intelligence
 
-- Explain why a card matched and compare useful versus noisy delivery.
+- Compare useful versus noisy delivery using explicit user feedback and downstream outcomes.
 - Detect overlap, contradiction, and stale knowledge before it reaches agents.
-- Measure outcomes by harness and repository without splitting the canonical store.
-
+- Recommend scope tightening or consolidation without splitting the canonical store.

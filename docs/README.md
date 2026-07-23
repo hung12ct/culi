@@ -1,12 +1,28 @@
-# Screenshots for the README
+# Culi documentation
 
-Drop PNGs here with these exact names and the main README will render them:
+Start with the guide that matches what you are trying to do:
 
-| File | Screen | How to capture |
-|---|---|---|
-| `overview.png` | Overview / health | `culi serve` → Overview tab |
-| `review.png` | Candidate review queue | `culi serve` → Review tab |
-| `knowledge-base.png` | Knowledge base + search | `culi serve` → Knowledge Base tab |
-| `activity.png` | Injection activity | `culi serve` → Activity → Injections |
+| Guide | Use it for |
+|---|---|
+| [Getting started](getting-started.md) | Install Culi, connect Claude/Codex, verify hooks, and add your first knowledge |
+| [Console](console.md) | Understand Home, Review, Knowledge Pulse, Activity, Settings, and themes |
+| [Knowledge and imports](knowledge.md) | Author cards and reconcile existing `CLAUDE.md`, `AGENTS.md`, agents, and skills |
+| [Learning and cost](learning.md) | Choose a backend, configure auth/caps, and scan Codex history |
+| [Configuration](configuration.md) | Reference every supported `config.yaml` setting |
+| [Product vision](VISION.md) | Read the product principles and roadmap |
 
-Tip: a browser window ~1200px wide gives crisp, well-proportioned shots.
+The root [README](../README.md) is intentionally short and serves as the project landing page.
+
+## Screenshot assets
+
+The root README and console guide use these files:
+
+| File | Screen |
+|---|---|
+| `overview.png` | Home / system health |
+| `review.png` | Candidate review queue |
+| `knowledge-base.png` | Knowledge cards and search |
+| `activity.png` | Per-session context delivery |
+| `settings.png` | Learning and retrieval settings |
+
+A browser window around 1200px wide produces well-proportioned captures.
