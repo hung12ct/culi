@@ -215,6 +215,29 @@ func TestSessionEndEnqueues(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("inbox entries = %v, %v", entries, err)
 	}
+	rawJob, _ := os.ReadFile(filepath.Join(base, "inbox", entries[0].Name()))
+	if !strings.Contains(string(rawJob), `"source":"claude"`) || !strings.Contains(string(rawJob), `"trigger":"session-end"`) ||
+		!strings.Contains(string(rawJob), `"session_id":"claude:s-end"`) {
+		t.Errorf("job metadata = %s", rawJob)
+	}
+}
+
+func TestCodexStopEnqueuesPeriodicJob(t *testing.T) {
+	base := sandbox(t)
+	raw, _ := json.Marshal(Input{SessionID: "s-stop", TranscriptPath: "/tmp/codex.jsonl", CWD: "/tmp"})
+	var out bytes.Buffer
+	if code := Run([]string{"stop", "--harness=codex"}, strings.NewReader(string(raw)), &out); code != 0 || out.Len() != 0 {
+		t.Fatalf("code=%d out=%q", code, out.String())
+	}
+	entries, err := os.ReadDir(filepath.Join(base, "inbox"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries=%v err=%v", entries, err)
+	}
+	job, _ := os.ReadFile(filepath.Join(base, "inbox", entries[0].Name()))
+	if !strings.Contains(string(job), `"source":"codex"`) || !strings.Contains(string(job), `"trigger":"stop"`) ||
+		!strings.Contains(string(job), `"session_id":"codex:s-stop"`) {
+		t.Errorf("job=%s", job)
+	}
 }
 
 // Inside culi's own headless `claude -p` learning calls (CULI_INTERNAL set),

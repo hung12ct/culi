@@ -23,7 +23,7 @@ import (
 type Item struct {
 	Repo        string   `json:"repo"`      // repo name (unique across the scan)
 	RepoPath    string   `json:"repo_path"` // absolute repo root
-	Kind        string   `json:"kind"`      // agent | skill | claudemd
+	Kind        string   `json:"kind"`      // agent | skill | claudemd | agentsmd
 	Name        string   `json:"name"`      // identity within kind
 	Path        string   `json:"path"`      // absolute file path (SKILL.md for skills)
 	Hash        string   `json:"hash"`      // sha256 of raw content
@@ -52,6 +52,7 @@ type RepoInfo struct {
 	Agents   int    `json:"agents"`
 	Skills   int    `json:"skills"`
 	ClaudeMD bool   `json:"claude_md"`
+	AgentsMD bool   `json:"agents_md"`
 }
 
 // Report is the full scan result, persisted to knowledge/.import/scan.json so
@@ -61,6 +62,7 @@ type Report struct {
 	Repos       []RepoInfo `json:"repos"`
 	Clusters    []Cluster  `json:"clusters"`
 	ClaudeMD    []Item     `json:"claude_md"` // root CLAUDE.md files, decomposed at merge
+	AgentsMD    []Item     `json:"agents_md"` // active global/repo-root Codex guidance
 }
 
 // artifactMeta is the subset of Claude Code agent/skill frontmatter scan reads.
@@ -71,6 +73,12 @@ type artifactMeta struct {
 
 // Scan inventories every repo and clusters agents and skills by identity.
 func Scan(repoPaths []string) (Report, error) {
+	return ScanWithCodex(repoPaths, "")
+}
+
+// ScanWithCodex also inventories active Codex guidance. Nested instruction
+// files are intentionally excluded until culi can preserve subtree scope.
+func ScanWithCodex(repoPaths []string, codexHome string) (Report, error) {
 	if len(repoPaths) == 0 {
 		return Report{}, fmt.Errorf("importer: no repos to scan (set `repos:` in config.yaml or pass paths)")
 	}
@@ -99,9 +107,21 @@ func Scan(repoPaths []string) (Report, error) {
 			case "skill":
 				info.Skills++
 				byKey[it.Kind+"/"+it.Name] = append(byKey[it.Kind+"/"+it.Name], it)
+			case "agentsmd":
+				info.AgentsMD = true
+				rep.AgentsMD = append(rep.AgentsMD, it)
 			}
 		}
 		rep.Repos = append(rep.Repos, info)
+	}
+	if codexHome != "" {
+		if path := activeAgentsFile(codexHome); path != "" {
+			it, err := readItem("global", codexHome, "agentsmd", "global", path)
+			if err != nil {
+				return Report{}, err
+			}
+			rep.AgentsMD = append(rep.AgentsMD, it)
+		}
 	}
 	for key, items := range byKey {
 		kind, name, _ := strings.Cut(key, "/")
@@ -163,7 +183,26 @@ func scanRepo(name, root string) ([]Item, error) {
 		}
 		out = append(out, it)
 	}
+	if path := activeAgentsFile(root); path != "" {
+		it, err := readItem(name, root, "agentsmd", name, path)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, it)
+	}
 	return out, nil
+}
+
+// activeAgentsFile mirrors Codex precedence at one directory level.
+func activeAgentsFile(dir string) string {
+	for _, name := range []string{"AGENTS.override.md", "AGENTS.md"} {
+		path := filepath.Join(dir, name)
+		raw, err := os.ReadFile(path)
+		if err == nil && len(strings.TrimSpace(string(raw))) > 0 {
+			return path
+		}
+	}
+	return ""
 }
 
 // readItem loads one artifact file and computes its identity hashes.

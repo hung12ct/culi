@@ -150,6 +150,34 @@ func TestGenerateEndToEndAndNoOp(t *testing.T) {
 	}
 }
 
+func TestGenerateCodexTargetHasIndependentState(t *testing.T) {
+	fake := &fakeGen{payloads: map[string]string{
+		"claudemd_sections": sectionsPayload,
+		"repo_cards":        cardsPayload,
+	}}
+	g := newGenerator(t, fake)
+	root := scratchRepo(t)
+	facts, err := gitfacts.Collect(context.Background(), root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := g.Generate(context.Background(), facts, "", false); err != nil {
+		t.Fatal(err)
+	}
+	g.Target = "codex"
+	res, err := g.Generate(context.Background(), facts, "", false)
+	if err != nil || res.NoOp {
+		t.Fatalf("codex res=%+v err=%v", res, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+	if err != nil || !strings.Contains(string(raw), "culi:begin id=module-map") {
+		t.Fatalf("AGENTS.md: %v\n%s", err, raw)
+	}
+	if fake.calls["claudemd_sections"] != 2 {
+		t.Errorf("target-aware state calls=%v", fake.calls)
+	}
+}
+
 func TestGenerateBranchModeCardsOnly(t *testing.T) {
 	fake := &fakeGen{payloads: map[string]string{"repo_cards": cardsPayload}}
 	g := newGenerator(t, fake)

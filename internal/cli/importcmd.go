@@ -42,7 +42,7 @@ func importScan(args []string) error {
 	if len(repos) == 0 {
 		repos = cfg.Repos
 	}
-	rep, err := importer.Scan(repos)
+	rep, err := importer.ScanWithCodex(repos, codexHome())
 	if err != nil {
 		return err
 	}
@@ -62,6 +62,9 @@ func printScan(rep importer.Report) {
 		if r.ClaudeMD {
 			cm = "+CLAUDE.md"
 		}
+		if r.AgentsMD {
+			cm += "+AGENTS.md"
+		}
 		fmt.Printf("repo %-16s %2d agents %2d skills %s\n", r.Name, r.Agents, r.Skills, cm)
 	}
 	counts := map[string]int{}
@@ -80,8 +83,8 @@ func printScan(rep importer.Report) {
 		}
 		fmt.Printf("  %-9s %-28s ×%d%s\n", cl.Class, cl.Key, len(cl.Items), extra)
 	}
-	fmt.Printf("\nclusters: %d identical, %d superset, %d diverged, %d unique · %d CLAUDE.md\n",
-		counts["identical"], counts["superset"], counts["diverged"], counts["unique"], len(rep.ClaudeMD))
+	fmt.Printf("\nclusters: %d identical, %d superset, %d diverged, %d unique · %d CLAUDE.md · %d AGENTS.md\n",
+		counts["identical"], counts["superset"], counts["diverged"], counts["unique"], len(rep.ClaudeMD), len(rep.AgentsMD))
 }
 
 // mergeTimeout bounds the whole merge run. Sized for the slowest transport:

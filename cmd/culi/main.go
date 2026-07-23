@@ -1,4 +1,4 @@
-// Command culi is the context orchestrator for Claude Code: a canonical
+// Command culi is the context orchestrator for Claude Code and Codex: a canonical
 // knowledge-card store, token-budgeted context injection via hooks, and (in
 // later phases) MCP retrieval and background learning.
 //
@@ -13,10 +13,10 @@ import (
 	"github.com/hung12ct/culi/internal/hook"
 )
 
-const usage = `culi — context orchestrator for Claude Code
+const usage = `culi — context orchestrator for Claude Code and Codex
 
 Usage:
-  culi init                     set up ~/.culi, register hooks + MCP server
+  culi init [--harness=auto]    set up ~/.culi, register harness hooks + MCP
   culi hook <event>             hook handler (stdin JSON → stdout JSON; internal)
   culi mcp                      MCP stdio server (spawned by Claude Code; internal)
   culi index [--full]           sync knowledge/ into the index + embed changed cards
@@ -27,7 +27,7 @@ Usage:
   culi export [--check]         regenerate ~/.claude agents/skills from cards
   culi learn [--from-start]     mine queued session transcripts into candidate cards
   culi review [--list]          approve/reject mined candidate cards
-  culi gen [--repo X] [--branch Y]  git history → CLAUDE.md sections + repo cards
+  culi gen [--repo X] [--target claude|codex|both]  git history → instructions + repo cards
   culi stats [--json]           token accounting, gate economics, learning spend
   culi serve [--addr host:port] local web review console (default localhost:7378)
   culi statusline               Claude Code statusLine segment (stdin JSON; internal)

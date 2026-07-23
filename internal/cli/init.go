@@ -11,18 +11,25 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/store"
 )
 
-// Init sets up ~/.culi and registers the Claude Code hooks.
+// Init sets up ~/.culi and registers the selected coding harnesses.
 func Init(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	noHooks := fs.Bool("no-hooks", false, "skip registering hooks in ~/.claude/settings.json")
+	noHooks := fs.Bool("no-hooks", false, "skip registering lifecycle hooks (MCP is still registered)")
+	harness := fs.String("harness", "auto", "harness to configure: auto|claude|codex|all")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
+	}
+	harnesses, err := selectHarnesses(*harness)
+	if err != nil {
+		return err
 	}
 
 	base, err := config.BaseDir()
@@ -119,28 +126,83 @@ ollama:
 	s.Close()
 	fmt.Printf("index:    %s\n", config.DBPath(base))
 
-	if *noHooks {
-		fmt.Println("hooks:    skipped (--no-hooks)")
-		return nil
+	if len(harnesses) == 0 {
+		fmt.Println("harness:  none detected (use --harness=claude|codex|all to configure explicitly)")
 	}
-	changed, err := registerHooks()
-	if err != nil {
-		return err
+	for _, h := range harnesses {
+		if *noHooks {
+			fmt.Printf("hooks:    %s skipped (--no-hooks)\n", h)
+		} else {
+			var changed bool
+			switch h {
+			case "claude":
+				changed, err = registerHooksClaude()
+			case "codex":
+				changed, err = registerHooksCodex()
+			}
+			if err != nil {
+				return err
+			}
+			if changed {
+				fmt.Printf("hooks:    %s registered\n", h)
+			} else {
+				fmt.Printf("hooks:    %s already registered\n", h)
+			}
+		}
+		switch h {
+		case "claude":
+			registerMCPClaude()
+		case "codex":
+			registerMCPCodex()
+		}
 	}
-	if changed {
-		fmt.Println("hooks:    registered in ~/.claude/settings.json (backup: settings.json.culi-backup)")
-	} else {
-		fmt.Println("hooks:    already registered")
-	}
-	registerMCP()
 	fmt.Println("\nSeed cards into", kdir, "then run `culi index`.")
 	return nil
+}
+
+func selectHarnesses(v string) ([]string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "claude":
+		return []string{"claude"}, nil
+	case "codex":
+		return []string{"codex"}, nil
+	case "all":
+		return []string{"claude", "codex"}, nil
+	case "auto":
+		var out []string
+		home, _ := os.UserHomeDir()
+		if _, err := exec.LookPath("claude"); err == nil || dirExists(filepath.Join(home, ".claude")) {
+			out = append(out, "claude")
+		}
+		if _, err := exec.LookPath("codex"); err == nil || dirExists(codexHome()) {
+			out = append(out, "codex")
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("cli: unknown harness %q (want auto|claude|codex|all)", v)
+	}
+}
+
+func dirExists(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}
+
+func codexHome() string {
+	if path := strings.TrimSpace(os.Getenv("CODEX_HOME")); path != "" {
+		return filepath.Clean(path)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".codex")
 }
 
 // registerMCP registers `culi mcp` as a user-scope MCP server via the claude
 // CLI — the CLI owns ~/.claude.json, so we never edit that file ourselves
 // (C4). Best-effort: a missing/odd claude binary just prints the manual step.
-func registerMCP() {
+func registerMCPClaude() {
 	exe, err := os.Executable()
 	if err != nil {
 		return
@@ -162,10 +224,59 @@ func registerMCP() {
 	fmt.Println("mcp:      registered (user scope) — tools: search_context, expand_card, save_lesson")
 }
 
+// registerMCPCodex lets the Codex CLI own its config.toml. An existing culi
+// entry is preserved: overwriting user MCP configuration is never implicit.
+func registerMCPCodex() {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	manual := fmt.Sprintf("mcp:      run: codex mcp add culi -- %s mcp", quoteCommandArg(exe))
+	codex, err := exec.LookPath("codex")
+	if err != nil {
+		fmt.Println(manual)
+		return
+	}
+	if out, err := exec.Command(codex, "mcp", "get", "culi", "--json").CombinedOutput(); err == nil {
+		if codexMCPMatches(out, exe) {
+			fmt.Println("mcp:      codex already registered")
+		} else {
+			fmt.Printf("warning:  codex MCP entry named culi already exists and was preserved\n"+
+				"mcp:      to replace it, run `codex mcp remove culi`, then: %s\n", strings.TrimPrefix(manual, "mcp:      run: "))
+		}
+		return
+	}
+	if out, err := exec.Command(codex, "mcp", "add", "culi", "--", exe, "mcp").CombinedOutput(); err != nil {
+		fmt.Printf("warning:  codex mcp add failed (%v: %s)\n%s\n", err, strings.TrimSpace(string(out)), manual)
+		return
+	}
+	fmt.Println("mcp:      codex registered — tools: search_context, expand_card, save_lesson")
+}
+
+func codexMCPMatches(raw []byte, exe string) bool {
+	var cfg struct {
+		Command   string   `json:"command"` // older CLI shape
+		Args      []string `json:"args"`
+		Transport struct {
+			Type    string   `json:"type"`
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"transport"`
+	}
+	if json.Unmarshal(raw, &cfg) != nil {
+		return false
+	}
+	if cfg.Transport.Command != "" {
+		return cfg.Transport.Type == "stdio" && cfg.Transport.Command == exe &&
+			len(cfg.Transport.Args) == 1 && cfg.Transport.Args[0] == "mcp"
+	}
+	return cfg.Command == exe && len(cfg.Args) == 1 && cfg.Args[0] == "mcp"
+}
+
 // registerHooks merges culi's three hook entries into ~/.claude/settings.json,
 // preserving everything else. Never destroys user content (C4): the original
 // is backed up once before the first modification.
-func registerHooks() (changed bool, err error) {
+func registerHooksClaude() (changed bool, err error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false, fmt.Errorf("cli: resolving home: %w", err)
@@ -275,6 +386,120 @@ func registerHooks() (changed bool, err error) {
 	return true, nil
 }
 
+// registerHooksCodex merges culi's Codex hooks into $CODEX_HOME/hooks.json.
+// The top-level "hooks" object is required by Codex's lifecycle schema.
+func registerHooksCodex() (changed bool, err error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return false, fmt.Errorf("cli: resolving executable: %w", err)
+	}
+	dir := codexHome()
+	if dir == "" {
+		return false, fmt.Errorf("cli: resolving CODEX_HOME")
+	}
+	path := filepath.Join(dir, "hooks.json")
+	root := map[string]any{}
+	raw, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
+		return false, fmt.Errorf("cli: reading Codex hooks.json: %w", err)
+	default:
+		if len(bytes.TrimSpace(raw)) > 0 {
+			if err := json.Unmarshal(raw, &root); err != nil {
+				return false, fmt.Errorf("cli: Codex hooks.json is not valid JSON: %w", err)
+			}
+		}
+	}
+	hooks, _ := root["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+	}
+	for _, ev := range []struct {
+		name, event string
+		timeout     float64
+	}{
+		{"SessionStart", "session-start", 10},
+		{"UserPromptSubmit", "user-prompt-submit", 10},
+		{"Stop", "stop", 30},
+		{"SessionEnd", "session-end", 30},
+	} {
+		if hasCuliHook(hooks[ev.name]) {
+			continue
+		}
+		cmd := joinCommand(exe, "hook", ev.event, "--harness=codex")
+		entry := map[string]any{"type": "command", "command": cmd, "timeout": ev.timeout}
+		group := map[string]any{"hooks": []any{entry}}
+		list, _ := hooks[ev.name].([]any)
+		hooks[ev.name] = append(list, group)
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+	root["hooks"] = hooks
+	if raw != nil {
+		backup := path + ".culi-backup"
+		if _, err := os.Stat(backup); errors.Is(err, os.ErrNotExist) {
+			if err := os.WriteFile(backup, raw, 0o644); err != nil {
+				return false, fmt.Errorf("cli: writing Codex hooks backup: %w", err)
+			}
+		}
+	}
+	if err := atomicWriteJSON(path, root, ".hooks-culi-*"); err != nil {
+		return false, err
+	}
+	fmt.Println("hooks:    Codex requires review — open a new session and run `/hooks` to trust culi")
+	return true, nil
+}
+
+func atomicWriteJSON(path string, v any, pattern string) error {
+	out, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("cli: marshaling %s: %w", filepath.Base(path), err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("cli: creating %s: %w", filepath.Dir(path), err)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), pattern)
+	if err != nil {
+		return fmt.Errorf("cli: creating temporary %s: %w", filepath.Base(path), err)
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(append(out, '\n')); err != nil {
+		tmp.Close()
+		os.Remove(name)
+		return fmt.Errorf("cli: writing temporary %s: %w", filepath.Base(path), err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("cli: closing temporary %s: %w", filepath.Base(path), err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		os.Remove(name)
+		return fmt.Errorf("cli: replacing %s: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+func joinCommand(args ...string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = quoteCommandArg(arg)
+	}
+	return strings.Join(quoted, " ")
+}
+
+func quoteCommandArg(s string) string {
+	if runtime.GOOS == "windows" {
+		return strconv.Quote(s)
+	}
+	if s != "" && !strings.ContainsAny(s, " \t\n'\"\\$`;&|<>()") {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
 // hasCuliHook scans one event's matcher groups for an existing culi command.
 func hasCuliHook(v any) bool {
 	groups, _ := v.([]any)
@@ -284,7 +509,8 @@ func hasCuliHook(v any) bool {
 		for _, h := range inner {
 			hm, _ := h.(map[string]any)
 			cmd, _ := hm["command"].(string)
-			if filepath.Base(firstField(cmd)) == "culi" {
+			if filepath.Base(firstField(cmd)) == "culi" ||
+				(strings.Contains(cmd, " hook ") && strings.Contains(cmd, "--harness=codex")) {
 				return true
 			}
 		}

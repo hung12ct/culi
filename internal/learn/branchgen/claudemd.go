@@ -122,20 +122,20 @@ func hash8(s string) string {
 
 // writeClaudeMD atomically replaces path (temp + rename); a torn write must
 // never truncate the user's CLAUDE.md (C4).
-func writeClaudeMD(path, content string) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".claudemd-*")
+func writeInstructionFile(path, content string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".culi-instructions-*")
 	if err != nil {
-		return fmt.Errorf("branchgen: creating temp: %w", err)
+		return fmt.Errorf("branchgen: creating temporary %s: %w", filepath.Base(path), err)
 	}
 	name := tmp.Name()
 	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
 		os.Remove(name)
-		return fmt.Errorf("branchgen: writing CLAUDE.md: %w", err)
+		return fmt.Errorf("branchgen: writing %s: %w", filepath.Base(path), err)
 	}
 	if err := tmp.Close(); err != nil {
 		os.Remove(name)
-		return fmt.Errorf("branchgen: closing temp: %w", err)
+		return fmt.Errorf("branchgen: closing temporary %s: %w", filepath.Base(path), err)
 	}
 	if err := os.Chmod(name, 0o644); err != nil {
 		os.Remove(name)
@@ -143,7 +143,7 @@ func writeClaudeMD(path, content string) error {
 	}
 	if err := os.Rename(name, path); err != nil {
 		os.Remove(name)
-		return fmt.Errorf("branchgen: replacing CLAUDE.md: %w", err)
+		return fmt.Errorf("branchgen: replacing %s: %w", filepath.Base(path), err)
 	}
 	return nil
 }

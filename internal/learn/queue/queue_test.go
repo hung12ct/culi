@@ -161,3 +161,14 @@ func TestShouldMine(t *testing.T) {
 		}
 	}
 }
+
+func TestLegacyJobDefaults(t *testing.T) {
+	j := Job{}
+	if j.EffectiveSource() != "claude" || !j.IsFinal() {
+		t.Fatalf("legacy defaults: source=%q final=%v", j.EffectiveSource(), j.IsFinal())
+	}
+	j = Job{Source: "codex", Trigger: "stop"}
+	if j.EffectiveSource() != "codex" || j.IsFinal() {
+		t.Fatalf("codex stop: source=%q final=%v", j.EffectiveSource(), j.IsFinal())
+	}
+}

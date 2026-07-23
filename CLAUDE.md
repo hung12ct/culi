@@ -1,9 +1,9 @@
 # CLAUDE.md — Culi
 
 > **Culi** (cà phê culi — the single dense peaberry bean; sibling of [Phin](https://github.com/hung12ct/phin))
-> is a **context orchestrator for Claude Code**: one canonical knowledge store of small "cards"
-> (rules / skills / lessons / styles / patterns), token-budgeted context injection via Claude Code
-> hooks, on-demand depth via an MCP server, and background learning from transcripts + git history.
+> is a **context orchestrator for Claude Code and OpenAI Codex**: one canonical knowledge store of
+> small "cards" (rules / skills / lessons / styles / patterns), token-budgeted context injection via
+> harness hooks, on-demand depth via an MCP server, and background learning from transcripts + git history.
 > Built on **gopheragent**. Pure Go, one binary, no CGO.
 >
 > **Product goal:** kill per-repo CLAUDE.md/skill duplication and inject *only* the most relevant
@@ -18,10 +18,10 @@ schemas, learning pipelines, phased roadmap).
 - **Files are truth**: `~/.culi/knowledge/` (git-init'd markdown cards with YAML frontmatter) is the
   source of truth; `~/.culi/index.db` (SQLite via `modernc.org/sqlite`: FTS5 BM25 + embedding blobs)
   is disposable — schema change ⇒ drop & rebuild, never ALTER migrations.
-- **Push**: `culi hook <event>` — UserPromptSubmit/SessionStart handlers, stdin JSON → stdout JSON.
+- **Push**: `culi hook <event>` — normalized Claude/Codex UserPromptSubmit, SessionStart, Stop, and SessionEnd adapters.
 - **Pull**: `culi mcp` — stdio MCP server (`modelcontextprotocol/go-sdk`): `search_context`,
   `expand_card`, `save_lesson`.
-- **Learning** (`internal/learn/`): transcript mining, style synthesis, branch→CLAUDE.md generation,
+- **Learning** (`internal/learn/`): Claude/Codex transcript mining, style synthesis, branch→CLAUDE.md/AGENTS.md generation,
   cross-branch patterns — Haiku for routine steps, Sonnet escalation, hard daily USD cap.
 - **Embeddings**: local Ollama (nomic-embed-text) behind gopheragent's `tools.Embedder`; every path
   degrades gracefully to BM25-only when Ollama is down.

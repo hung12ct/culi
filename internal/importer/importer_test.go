@@ -93,6 +93,35 @@ func TestScanClassifies(t *testing.T) {
 	}
 }
 
+func TestScanCodexGuidanceUsesOverrideAndSkipsNested(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "repo")
+	codexHome := t.TempDir()
+	writeRepo(t, root, map[string]string{
+		"AGENTS.md":          "repo base",
+		"AGENTS.override.md": "repo override",
+		"pkg/AGENTS.md":      "nested must wait for subtree scopes",
+	})
+	writeRepo(t, codexHome, map[string]string{
+		"AGENTS.md":          "global base",
+		"AGENTS.override.md": "global override",
+	})
+	rep, err := ScanWithCodex([]string{root}, codexHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.AgentsMD) != 2 || !rep.Repos[0].AgentsMD {
+		t.Fatalf("agents guidance = %+v repos=%+v", rep.AgentsMD, rep.Repos)
+	}
+	for _, it := range rep.AgentsMD {
+		if filepath.Base(it.Path) != "AGENTS.override.md" {
+			t.Errorf("inactive guidance selected: %s", it.Path)
+		}
+		if strings.Contains(it.Path, string(filepath.Separator)+"pkg"+string(filepath.Separator)) {
+			t.Errorf("nested guidance imported: %s", it.Path)
+		}
+	}
+}
+
 func TestScanReportRoundTrip(t *testing.T) {
 	rep, err := Scan(fixtureRepos(t))
 	if err != nil {

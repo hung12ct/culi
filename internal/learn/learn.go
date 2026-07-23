@@ -143,7 +143,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		if fromStart {
 			cur = queue.Cursor{}
 		}
-		if !queue.ShouldMine(cur, st.Size(), true, now) {
+		if !queue.ShouldMine(cur, st.Size(), job.IsFinal(), now) {
 			_ = queue.Done(job) // nothing new since the last mine
 			return queue.Cursor{}, false
 		}

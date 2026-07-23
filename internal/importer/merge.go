@@ -51,8 +51,9 @@ type Residue struct {
 
 // ClaudeMDInput is one repo's root CLAUDE.md.
 type ClaudeMDInput struct {
-	Repo    string
-	Content string
+	Repo     string
+	Filename string // defaults to CLAUDE.md; also supports AGENTS.md
+	Content  string
 }
 
 // Decomposition splits a CLAUDE.md into atomic cards plus the residual
@@ -152,6 +153,23 @@ func Merge(ctx context.Context, knowledgeDir string, rep Report, m Merger, opts 
 			return res, err
 		}
 	}
+	seenGuidance := map[string]bool{}
+	for _, it := range rep.ClaudeMD {
+		seenGuidance[it.NormHash] = true
+	}
+	for _, it := range rep.AgentsMD {
+		it := it
+		if seenGuidance[it.NormHash] {
+			res.Skipped = append(res.Skipped, fmt.Sprintf("agentsmd/%s: identical guidance already imported", it.Repo))
+			continue
+		}
+		if err := step("agentsmd:"+it.Repo, func() error {
+			return mergeAgentsMD(ctx, staged, it, m, &res)
+		}); err != nil {
+			return res, err
+		}
+		seenGuidance[it.NormHash] = true
+	}
 	if resumed > 0 {
 		res.Notes = append(res.Notes, fmt.Sprintf("resume: %d already-staged units skipped", resumed))
 	}
@@ -231,23 +249,38 @@ func mergeCluster(ctx context.Context, staged string, cl Cluster, m Merger, res 
 
 // mergeClaudeMD decomposes one repo's CLAUDE.md into cards + residual.
 func mergeClaudeMD(ctx context.Context, staged string, it Item, m Merger, res *MergeResult) error {
+	return mergeGuidance(ctx, staged, it, m, res, "claudemd", "CLAUDE.md")
+}
+
+func mergeAgentsMD(ctx context.Context, staged string, it Item, m Merger, res *MergeResult) error {
+	return mergeGuidance(ctx, staged, it, m, res, "agentsmd", filepath.Base(it.Path))
+}
+
+func mergeGuidance(ctx context.Context, staged string, it Item, m Merger, res *MergeResult, kind, filename string) error {
 	if m == nil {
-		res.Skipped = append(res.Skipped, fmt.Sprintf("claudemd/%s: needs LLM decomposition (set ANTHROPIC_API_KEY)", it.Repo))
+		res.Skipped = append(res.Skipped, fmt.Sprintf("%s/%s: needs LLM decomposition (set ANTHROPIC_API_KEY)", kind, it.Repo))
 		return nil
 	}
 	raw, err := os.ReadFile(it.Path)
 	if err != nil {
 		return fmt.Errorf("importer: reading %s: %w", it.Path, err)
 	}
-	out, err := m.DecomposeClaudeMD(ctx, ClaudeMDInput{Repo: it.Repo, Content: string(raw)})
+	out, err := m.DecomposeClaudeMD(ctx, ClaudeMDInput{Repo: it.Repo, Filename: filename, Content: string(raw)})
 	if err != nil {
-		return fmt.Errorf("importer: decomposing CLAUDE.md of %s: %w", it.Repo, err)
+		return fmt.Errorf("importer: decomposing %s of %s: %w", filename, it.Repo, err)
 	}
 	res.Usage.add(out.Usage)
 	if out.Notes != "" {
-		res.Notes = append(res.Notes, "claudemd/"+it.Repo+": "+out.Notes)
+		res.Notes = append(res.Notes, kind+"/"+it.Repo+": "+out.Notes)
 	}
 	for _, dc := range out.Cards {
+		if kind == "agentsmd" {
+			if it.Repo == "global" {
+				dc.Scope = "global"
+			} else {
+				dc.Scope = "repo:" + it.Repo
+			}
+		}
 		rel, err := stageDecomposed(staged, it.Repo, dc, modelName(m))
 		if err != nil {
 			return err
@@ -255,7 +288,7 @@ func mergeClaudeMD(ctx context.Context, staged string, it Item, m Merger, res *M
 		res.Staged = append(res.Staged, rel)
 	}
 	if strings.TrimSpace(out.Residual) != "" {
-		rel := filepath.Join("residual", it.Repo+".CLAUDE.md")
+		rel := filepath.Join("residual", it.Repo+"."+filename)
 		if err := writeStaged(staged, rel, []byte(out.Residual)); err != nil {
 			return err
 		}

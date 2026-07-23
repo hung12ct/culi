@@ -28,6 +28,7 @@ func Gen(args []string) error {
 	branch := fs.String("branch", "", "extract branch-scoped cards for this branch instead of regenerating CLAUDE.md")
 	dryRun := fs.Bool("dry-run", false, "print the rendered git facts and exit (zero LLM calls)")
 	force := fs.Bool("force", false, "regenerate even when the facts hash is unchanged")
+	target := fs.String("target", "claude", "instruction target: claude|codex|both")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
 	}
@@ -65,7 +66,7 @@ func Gen(args []string) error {
 		return err
 	}
 	defer s.Close()
-	g := &branchgen.Generator{Base: base, Store: s, Tier: tier}
+	g := &branchgen.Generator{Base: base, Store: s, Tier: tier, Target: *target}
 	res, err := g.Generate(ctx, facts, *branch, *force)
 	printGen(res)
 	return err

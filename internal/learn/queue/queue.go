@@ -24,6 +24,8 @@ type Job struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	CWD            string `json:"cwd"`
+	Source         string `json:"source,omitempty"`
+	Trigger        string `json:"trigger,omitempty"`
 	EnqueuedAt     string `json:"enqueued_at"`
 
 	path     string // job file on disk
@@ -33,6 +35,16 @@ type Job struct {
 // Path returns the job file location; Attempts the prior failure count.
 func (j Job) Path() string  { return j.path }
 func (j Job) Attempts() int { return j.attempts }
+
+func (j Job) EffectiveSource() string {
+	if j.Source == "" {
+		return "claude"
+	}
+	return j.Source
+}
+
+// Missing trigger is a job from the old SessionEnd-only queue format.
+func (j Job) IsFinal() bool { return j.Trigger == "" || j.Trigger == "session-end" }
 
 // List reads every pending job (including previously failed retries), oldest
 // first. A malformed job file is skipped, never fatal.

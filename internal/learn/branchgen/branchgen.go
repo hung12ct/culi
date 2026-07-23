@@ -23,10 +23,11 @@ import (
 
 // Generator wires pipeline C's dependencies.
 type Generator struct {
-	Base  string // culi home
-	Store *store.Store
-	Tier  *llmtier.Tier
-	Logf  func(format string, args ...any)
+	Base   string // culi home
+	Store  *store.Store
+	Tier   *llmtier.Tier
+	Logf   func(format string, args ...any)
+	Target string // claude | codex | both; empty preserves claude
 }
 
 // Result reports one gen run.
@@ -45,6 +46,10 @@ type Result struct {
 // branch-scoped cards only — CLAUDE.md stays a repo-level artifact.
 func (g *Generator) Generate(ctx context.Context, facts gitfacts.Facts, branch string, force bool) (Result, error) {
 	var res Result
+	target, err := normalizeTarget(g.Target)
+	if err != nil {
+		return res, err
+	}
 	stateDir := config.StateDir(g.Base)
 	key := facts.Repo
 	if branch != "" {
@@ -52,7 +57,7 @@ func (g *Generator) Generate(ctx context.Context, facts gitfacts.Facts, branch s
 	}
 	// Keyed by root path, not basename — two checkouts named alike must not
 	// share no-op state.
-	key = facts.Root + "|" + key
+	key = facts.Root + "|" + key + "|target:" + target
 	st := loadGenState(stateDir)
 	hash := facts.Hash()
 	if !force && st[key] == hash {
@@ -62,7 +67,7 @@ func (g *Generator) Generate(ctx context.Context, facts gitfacts.Facts, branch s
 	factsMD := facts.Render()
 
 	if branch == "" {
-		if err := g.genSections(ctx, facts.Root, factsMD, &res); err != nil {
+		if err := g.genSections(ctx, facts.Root, target, factsMD, &res); err != nil {
 			return res, err
 		}
 	}
@@ -87,7 +92,7 @@ func (g *Generator) Generate(ctx context.Context, facts gitfacts.Facts, branch s
 }
 
 // genSections drafts and merges the CLAUDE.md spans (Strong tier — §9).
-func (g *Generator) genSections(ctx context.Context, root, factsMD string, res *Result) error {
+func (g *Generator) genSections(ctx context.Context, root, target, factsMD string, res *Result) error {
 	var out sectionsOut
 	usage, err := g.Tier.Generate(ctx, true, sectionsSystem, factsMD, "claudemd_sections", sectionsSchema(), &out)
 	res.Usage.Add(usage)
@@ -105,22 +110,54 @@ func (g *Generator) genSections(ctx context.Context, root, factsMD string, res *
 		secs = append(secs, Section{ID: slugify(s.ID), Title: s.Title, Markdown: s.Markdown})
 	}
 
-	path := filepath.Join(root, "CLAUDE.md")
-	existing := ""
-	if raw, err := os.ReadFile(path); err == nil {
-		existing = string(raw)
+	files := []string{"CLAUDE.md"}
+	switch target {
+	case "codex":
+		files = []string{"AGENTS.md"}
+	case "both":
+		files = []string{"CLAUDE.md", "AGENTS.md"}
 	}
-	merged, applied, conflicts := mergeClaudeMD(existing, secs)
-	res.Sections = applied
-	res.Conflicts = conflicts
-	if merged == existing {
-		return nil // byte-stable: leave mtime alone
+	for _, filename := range files {
+		path := filepath.Join(root, filename)
+		existing := ""
+		if raw, err := os.ReadFile(path); err == nil {
+			existing = string(raw)
+		}
+		merged, applied, conflicts := mergeClaudeMD(existing, secs)
+		for _, id := range applied {
+			if len(files) > 1 || filename != "CLAUDE.md" {
+				id = filename + ":" + id
+			}
+			res.Sections = append(res.Sections, id)
+		}
+		for _, id := range conflicts {
+			if len(files) > 1 || filename != "CLAUDE.md" {
+				id = filename + ":" + id
+			}
+			res.Conflicts = append(res.Conflicts, id)
+		}
+		if merged == existing {
+			continue
+		}
+		if err := writeInstructionFile(path, merged); err != nil {
+			return err
+		}
+		g.logf("%s: %d span(s) written, %d conflict(s)", filename, len(applied), len(conflicts))
 	}
-	if err := writeClaudeMD(path, merged); err != nil {
-		return err
-	}
-	g.logf("CLAUDE.md: %d span(s) written, %d conflict(s)", len(applied), len(conflicts))
 	return nil
+}
+
+func normalizeTarget(target string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(target)) {
+	case "", "claude":
+		return "claude", nil
+	case "codex":
+		return "codex", nil
+	case "both":
+		return "both", nil
+	default:
+		return "", fmt.Errorf("branchgen: unknown target %q (want claude|codex|both)", target)
+	}
 }
 
 // genCards extracts and upserts repo/branch-scoped cards (Cheap tier, one

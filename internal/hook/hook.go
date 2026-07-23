@@ -1,4 +1,4 @@
-// Package hook implements the Claude Code hook handlers. This is the hot
+// Package hook implements normalized Claude Code and Codex hook handlers. This is the hot
 // path: it runs on every prompt the user types.
 //
 // The two contracts that own this package (see /project-rule):
@@ -17,6 +17,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -33,6 +34,7 @@ type Input struct {
 	Prompt         string `json:"prompt"`
 	HookEventName  string `json:"hook_event_name"`
 	Source         string `json:"source"` // SessionStart: startup|resume|clear|compact
+	Harness        string `json:"-"`      // adapter identity, not hook-provided JSON
 }
 
 // output is the Claude Code hook stdout contract.
@@ -50,7 +52,7 @@ type specificShim struct {
 const (
 	promptDeadline  = 150 * time.Millisecond
 	sessionDeadline = 5 * time.Second
-	maxOutputChars  = 10000 // Claude Code truncates additionalContext at 10k
+	maxOutputChars  = 10000 // conservative shared guard (~Codex's 2,500-token spill threshold)
 )
 
 // Run executes one hook event, reading stdin JSON from in and writing the
@@ -73,6 +75,16 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 		return 0
 	}
 	event := args[0]
+	harness := "claude"
+	for _, arg := range args[1:] {
+		if v, ok := strings.CutPrefix(arg, "--harness="); ok {
+			if v != "claude" && v != "codex" {
+				logf(base, "hook: unknown harness %q", v)
+				return 0
+			}
+			harness = v
+		}
+	}
 
 	// Skip every event inside culi's own headless `claude -p` learning calls
 	// (llmgen sets this env). Injecting context would contaminate the mining
@@ -90,6 +102,8 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 		deadline, eventName = sessionDeadline, "SessionStart"
 	case "session-end":
 		deadline, eventName = sessionDeadline, ""
+	case "stop":
+		deadline, eventName = sessionDeadline, ""
 	default:
 		logf(base, "hook: unknown event %q", event)
 		return 0
@@ -99,6 +113,10 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 	if err := json.NewDecoder(io.LimitReader(in, 1<<20)).Decode(&input); err != nil {
 		logf(base, "hook %s: decoding stdin: %v", event, err)
 		return 0
+	}
+	input.Harness = harness
+	if input.SessionID != "" {
+		input.SessionID = harness + ":" + input.SessionID
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)

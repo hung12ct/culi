@@ -18,6 +18,7 @@ import (
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/indexer"
+	"github.com/hung12ct/culi/internal/learn/codexroll"
 	"github.com/hung12ct/culi/internal/learn/llmtier"
 	"github.com/hung12ct/culi/internal/learn/queue"
 	"github.com/hung12ct/culi/internal/learn/transcript"
@@ -69,7 +70,17 @@ type Result struct {
 func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor) (Result, queue.Cursor, error) {
 	var res Result
 	m.vecs = nil // card vectors may have changed since the previous session
-	entries, newOff, err := transcript.ReadFrom(job.TranscriptPath, cur.Offset)
+	var entries []transcript.Entry
+	var newOff int64
+	var err error
+	switch job.EffectiveSource() {
+	case "claude":
+		entries, newOff, err = transcript.ReadFrom(job.TranscriptPath, cur.Offset)
+	case "codex":
+		entries, newOff, err = codexroll.ReadFrom(job.TranscriptPath, cur.Offset)
+	default:
+		return Result{}, cur, fmt.Errorf("mine: unknown transcript source %q", job.Source)
+	}
 	if err != nil {
 		return res, cur, fmt.Errorf("mine: %w", err)
 	}

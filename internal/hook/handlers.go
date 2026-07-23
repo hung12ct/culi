@@ -36,6 +36,8 @@ func handle(ctx context.Context, base, event string, in Input) (string, error) {
 		return handleSessionStart(ctx, base, in)
 	case "session-end":
 		return "", handleSessionEnd(ctx, base, in)
+	case "stop":
+		return "", enqueueTranscript(base, in, "stop")
 	}
 	return "", fmt.Errorf("hook: unhandled event %q", event)
 }
@@ -200,6 +202,12 @@ func handleSessionEnd(ctx context.Context, base string, in Input) error {
 			s.Close()
 		}
 	}
+	return enqueueTranscript(base, in, "session-end")
+}
+
+// enqueueTranscript writes one stable pointer job. Stop periodically refreshes
+// it; SessionEnd marks the final, unthrottled flush.
+func enqueueTranscript(base string, in Input, trigger string) error {
 	if in.TranscriptPath == "" {
 		return nil
 	}
@@ -211,13 +219,15 @@ func handleSessionEnd(ctx context.Context, base string, in Input) error {
 		"session_id":      in.SessionID,
 		"transcript_path": in.TranscriptPath,
 		"cwd":             in.CWD,
+		"source":          in.Harness,
+		"trigger":         trigger,
 		"enqueued_at":     time.Now().UTC().Format(time.RFC3339),
 	}
 	raw, err := json.Marshal(job)
 	if err != nil {
 		return fmt.Errorf("hook: marshaling job: %w", err)
 	}
-	name := filepath.Join(dir, promptHash(in.SessionID+in.TranscriptPath)+".json")
+	name := filepath.Join(dir, promptHash(in.Harness+in.SessionID+in.TranscriptPath)+".json")
 	if err := os.WriteFile(name, raw, 0o644); err != nil {
 		return fmt.Errorf("hook: writing job: %w", err)
 	}

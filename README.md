@@ -1,7 +1,7 @@
 <div align="center">
   <img src="docs/logo.png" alt="culi" width="120" height="120" />
   <h1>culi ☕</h1>
-  <p><b>Context orchestrator for Claude Code</b> — one canonical knowledge store, injected <i>only</i> when it's relevant, so every prompt gets the right rules without paying to dump your whole <code>CLAUDE.md</code> every time.</p>
+  <p><b>Context orchestrator for Claude Code and OpenAI Codex</b> — one canonical knowledge store, injected <i>only</i> when it's relevant, so every prompt gets the right rules without paying to dump every instruction file each time.</p>
 </div>
 
 [![Release](https://img.shields.io/badge/release-v0.1.0%20%E2%80%94%20Peaberry-3ec7bb)](https://github.com/hung12ct/culi/releases/latest)
@@ -9,7 +9,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Single binary](https://img.shields.io/badge/deploy-single%20static%20binary-success)](#install)
 
-**culi** (cà phê culi — the single dense peaberry bean) keeps all your Claude Code context — rules, skills, lessons, styles, patterns — as small markdown "cards" in one place. On every prompt it pushes just the most relevant, token-budgeted slice into Claude via hooks, lets Claude pull more on demand via an MCP server, and quietly **learns** new lessons from your sessions.
+**culi** (cà phê culi — the single dense peaberry bean) keeps Claude Code and Codex context — rules, skills, lessons, styles, patterns — as small markdown "cards" in one place. On every prompt it pushes the most relevant token-budgeted slice through harness hooks, exposes deeper retrieval through MCP, and quietly **learns** from both transcript formats.
 
 In short: **self-improving agent memory and context engineering for Claude Code** — the memory-and-context layer that plugs into its harness and decides what Claude should know at each step, so you stop re-teaching it and stop paying for context it doesn't need.
 
@@ -55,10 +55,10 @@ mined candidates, a searchable knowledge base, a per-conversation injection log,
 
 ```bash
 go install github.com/hung12ct/culi/cmd/culi@latest
-culi init      # creates ~/.culi, registers the hook + MCP server in Claude Code
+culi init      # auto-detects Claude/Codex and registers hooks + MCP
 ```
 
-That's it. Open Claude Code in any repo and culi starts injecting context. Nothing else to run.
+That's it. Open a new Claude Code or Codex session in any repo and culi starts injecting context. For Codex, run `/hooks` once to review and trust the generated hook definitions.
 
 > Optional: install [Ollama](https://ollama.com) and `ollama pull nomic-embed-text` for semantic
 > retrieval. culi works without it (keyword/BM25) and degrades gracefully if it's ever down.
@@ -75,8 +75,8 @@ your prompt ─► [gate: skip acks/pastes] ─► scope + keyword + semantic ma
                                      ◄── inject only what fits ──►  Claude
 ```
 
-- **Push** — a Claude Code *hook* runs on each prompt, retrieves the best-matching cards, and injects a budgeted block. Fails open: any error → inject nothing, never blocks you.
-- **Pull** — an *MCP server* gives Claude three tools: `search_context`, `expand_card`, and `save_lesson` (tell Claude "remember this" and it writes a card — and folds it into an existing one instead of duplicating).
+- **Push** — a Claude Code or Codex *hook* runs on each prompt, retrieves the best-matching cards, and injects a budgeted block. Fails open: any error → inject nothing, never blocks you.
+- **Pull** — an *MCP server* gives either harness three tools: `search_context`, `expand_card`, and `save_lesson`.
 - **Learn** — after a session ends, culi mines the transcript in the background for lessons and missing rules, dedupes them against what it already knows, and queues them for your review.
 - **Files are truth** — everything lives as plain markdown in `~/.culi/knowledge/` (git-init'd). The search index is disposable and rebuilds from the files.
 
@@ -213,15 +213,15 @@ learn:
 
 | Command | What it does |
 |---|---|
-| `culi init` | Set up `~/.culi`, register hooks + MCP in Claude Code |
+| `culi init [--harness=auto\|claude\|codex\|all]` | Set up `~/.culi`, register selected hooks + MCP |
 | `culi serve` | Local web review console (default `localhost:7378`) |
 | `culi query <text>` | Debug retrieval from the terminal |
 | `culi stats` | Token accounting, gate economics, learning spend |
-| `culi import scan\|merge\|apply` | Reconcile drifted `.claude` dirs into the store |
+| `culi import scan\|merge\|apply` | Reconcile `.claude`, CLAUDE.md, and root/global AGENTS.md guidance |
 | `culi export` | Regenerate `~/.claude` agents/skills from cards |
 | `culi learn` | Mine queued session transcripts into candidate cards |
 | `culi review` | Approve/reject mined candidates |
-| `culi gen --repo X` | Turn git history into `CLAUDE.md` + repo cards |
+| `culi gen --repo X --target=claude\|codex\|both` | Turn git history into instruction spans + repo cards |
 | `culi card list\|show\|rm` | Inspect the card store |
 
 ---
@@ -239,7 +239,7 @@ learn:
 ## Requirements
 
 - **Go 1.25+** to install (the toolchain auto-downloads if needed)
-- **Claude Code** (hooks + MCP)
+- **Claude Code and/or Codex CLI 0.145+** (hooks + MCP)
 - **Ollama** with `nomic-embed-text` — *optional*, for semantic search
 
 ---
