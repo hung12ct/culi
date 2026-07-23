@@ -4,17 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/knowledge"
+	"github.com/hung12ct/culi/internal/learn/queue"
 	"github.com/hung12ct/culi/internal/pack"
 	"github.com/hung12ct/culi/internal/retrieve"
 	"github.com/hung12ct/culi/internal/store"
@@ -216,25 +215,12 @@ func enqueueTranscript(base string, in Input, trigger string) error {
 		lifecycleLog(base, in, trigger, "skip=no-transcript")
 		return nil
 	}
-	dir := config.InboxDir(base)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("hook: creating inbox: %w", err)
+	job := queue.Job{
+		SessionID: in.SessionID, TranscriptPath: in.TranscriptPath, CWD: in.CWD,
+		Source: in.Harness, Trigger: trigger, EnqueuedAt: time.Now().UTC().Format(time.RFC3339),
 	}
-	job := map[string]string{
-		"session_id":      in.SessionID,
-		"transcript_path": in.TranscriptPath,
-		"cwd":             in.CWD,
-		"source":          in.Harness,
-		"trigger":         trigger,
-		"enqueued_at":     time.Now().UTC().Format(time.RFC3339),
-	}
-	raw, err := json.Marshal(job)
-	if err != nil {
-		return fmt.Errorf("hook: marshaling job: %w", err)
-	}
-	name := filepath.Join(dir, promptHash(in.Harness+in.SessionID+in.TranscriptPath)+".json")
-	if err := os.WriteFile(name, raw, 0o644); err != nil {
-		return fmt.Errorf("hook: writing job: %w", err)
+	if err := queue.Enqueue(config.InboxDir(base), job); err != nil {
+		return fmt.Errorf("hook: enqueueing transcript: %w", err)
 	}
 	lifecycleLog(base, in, trigger, "queued")
 	spawnLearnWorker(base)

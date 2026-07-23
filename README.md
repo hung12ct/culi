@@ -100,6 +100,11 @@ synthesizes coding style, and turns git history into `CLAUDE.md` + repo cards. I
 **in the background after a session ends** (via the session-end hook) and can be run by hand
 with `culi learn`.
 
+Codex history can also be discovered directly from its read-only local state database. Preview
+what Culi can see with `culi learn --scan-codex --dry-run`, then run
+`culi learn --scan-codex` to queue current and older rollout transcripts. Existing byte cursors
+are reused, so later scans process only newly appended rollout content.
+
 ### Backends & cost
 
 Pick a backend with `learn.provider` (default `auto`):
@@ -215,6 +220,7 @@ learn:
 |---|---|
 | `culi init [--harness=auto\|claude\|codex\|all]` | Set up `~/.culi`, register selected hooks + MCP |
 | `culi doctor [--harness=codex]` | Verify Codex hooks/MCP, timeout alignment, recent activity, and pending learning |
+| `culi learn --scan-codex [--dry-run]` | Discover and backfill Codex rollout history (`--dry-run` only lists it) |
 | `culi serve` | Local web review console (default `localhost:7378`) |
 | `culi query <text>` | Debug retrieval from the terminal |
 | `culi stats` | Token accounting, gate economics, learning spend |

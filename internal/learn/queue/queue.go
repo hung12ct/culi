@@ -6,6 +6,8 @@
 package queue
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -30,6 +32,49 @@ type Job struct {
 
 	path     string // job file on disk
 	attempts int    // prior failed attempts, parsed from the .fN suffix
+}
+
+// Enqueue atomically writes one stable transcript pointer. The filename is
+// derived from source+session+path, so re-running a history scan (or a hook
+// re-delivering the same session) overwrites in place instead of creating a
+// duplicate job. Cross-mechanism dedup is a latent safety property, not an
+// exercised path: in practice each transcript reaches the queue one way only —
+// Codex via history scan, Claude via the hook.
+func Enqueue(inboxDir string, job Job) error {
+	if job.TranscriptPath == "" {
+		return nil
+	}
+	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
+		return fmt.Errorf("queue: creating inbox: %w", err)
+	}
+	raw, err := json.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("queue: marshaling job: %w", err)
+	}
+	key := job.EffectiveSource() + job.SessionID + job.TranscriptPath
+	sum := sha256.Sum256([]byte(key))
+	path := filepath.Join(inboxDir, hex.EncodeToString(sum[:8])+".json")
+	tmp, err := os.CreateTemp(inboxDir, ".job-*.tmp")
+	if err != nil {
+		return fmt.Errorf("queue: creating temporary job: %w", err)
+	}
+	name := tmp.Name()
+	defer os.Remove(name)
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("queue: setting job permissions: %w", err)
+	}
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return fmt.Errorf("queue: writing temporary job: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("queue: closing temporary job: %w", err)
+	}
+	if err := os.Rename(name, path); err != nil {
+		return fmt.Errorf("queue: replacing job: %w", err)
+	}
+	return nil
 }
 
 // Path returns the job file location; Attempts the prior failure count.

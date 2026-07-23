@@ -36,6 +36,17 @@ func TestReadFromMessagesAndNoise(t *testing.T) {
 	}
 }
 
+func TestSkipsSyntheticEnvironmentContext(t *testing.T) {
+	path := writeRollout(t,
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n<cwd>/secret/repo</cwd>\n</environment_context>"}]}}`,
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"fix the retry bug"}]}}`,
+	)
+	entries, _, err := ReadFrom(path, 0)
+	if err != nil || len(entries) != 1 || entries[0].Text != "fix the retry bug" {
+		t.Fatalf("entries=%+v err=%v", entries, err)
+	}
+}
+
 func TestExplicitToolFailureOnly(t *testing.T) {
 	path := writeRollout(t,
 		`{"type":"response_item","payload":{"type":"custom_tool_call_output","output":"error appears in successful output"}}`,

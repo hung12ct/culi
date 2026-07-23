@@ -89,7 +89,14 @@ func parseLine(raw []byte) (transcript.Entry, bool) {
 		if len(texts) == 0 {
 			return transcript.Entry{}, false
 		}
-		return transcript.Entry{Role: rl.Payload.Role, Text: strings.Join(texts, "\n")}, true
+		text := strings.Join(texts, "\n")
+		// Codex records its synthetic workspace envelope as a user message.
+		// It is harness state, not user intent, and mining it would teach Culi
+		// filesystem/sandbox metadata as if it were a reusable lesson.
+		if rl.Payload.Role == "user" && isHarnessEnvelope(text) {
+			return transcript.Entry{}, false
+		}
+		return transcript.Entry{Role: rl.Payload.Role, Text: text}, true
 	}
 
 	// Tool output is mined only when the record explicitly marks failure.
@@ -101,6 +108,12 @@ func parseLine(raw []byte) (transcript.Entry, bool) {
 		}
 	}
 	return transcript.Entry{}, false
+}
+
+func isHarnessEnvelope(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "<environment_context>") &&
+		strings.HasSuffix(trimmed, "</environment_context>")
 }
 
 func outputText(raw json.RawMessage) string {

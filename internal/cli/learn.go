@@ -11,6 +11,8 @@ import (
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/learn"
+	"github.com/hung12ct/culi/internal/learn/codexscan"
+	"github.com/hung12ct/culi/internal/learn/queue"
 )
 
 // learnTimeout bounds one worker run: a wedged backend must not leave a
@@ -31,8 +33,36 @@ func Learn(args []string) error {
 	forceStyle := fs.Bool("style", false, "force style synthesis now (bypass the weekly/15-observation trigger)")
 	auto := fs.Bool("auto", false, "background mode: log to ~/.culi/logs/learn.log (used by the session-end hook)")
 	noCap := fs.Bool("no-cap", false, "ignore the daily USD/call caps — mine the whole backlog in one run")
+	scanCodex := fs.Bool("scan-codex", false, "discover and enqueue Codex rollout history before learning")
+	dryRun := fs.Bool("dry-run", false, "with --scan-codex, list discovered sessions without writing or learning")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
+	}
+	if *dryRun && !*scanCodex {
+		return fmt.Errorf("cli: --dry-run requires --scan-codex")
+	}
+
+	var codexSessions []codexscan.Session
+	var codexSkipped int
+	if *scanCodex {
+		scanCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		var err error
+		codexSessions, codexSkipped, err = codexscan.Discover(scanCtx, codexHome())
+		cancel()
+		if err != nil {
+			return err
+		}
+		if *dryRun {
+			fmt.Printf("Codex sessions: %d\n", len(codexSessions))
+			for _, session := range codexSessions {
+				fmt.Printf("  codex:%s  %s  %s\n", session.SessionID,
+					session.UpdatedAt.Format(time.RFC3339), session.RolloutPath)
+			}
+			if codexSkipped > 0 {
+				fmt.Printf("  skipped %d rollout(s) outside %s or unreadable\n", codexSkipped, codexHome())
+			}
+			return nil
+		}
 	}
 	base, cfg, err := loadBase()
 	if err != nil {
@@ -42,6 +72,22 @@ func Learn(args []string) error {
 	logf := func(format string, args ...any) { fmt.Printf(format+"\n", args...) }
 	if *auto {
 		logf = fileLogf(base, "learn.log")
+	}
+	if len(codexSessions) > 0 {
+		for _, session := range codexSessions {
+			job := queue.Job{
+				SessionID: "codex:" + session.SessionID, TranscriptPath: session.RolloutPath,
+				CWD: session.CWD, Source: "codex", Trigger: "session-end",
+				EnqueuedAt: session.UpdatedAt.Format(time.RFC3339),
+			}
+			if err := queue.Enqueue(config.InboxDir(base), job); err != nil {
+				return err
+			}
+		}
+		logf("codex scan: %d transcript(s) queued", len(codexSessions))
+	}
+	if codexSkipped > 0 {
+		logf("codex scan: skipped %d rollout(s) outside %s or unreadable", codexSkipped, codexHome())
 	}
 
 	timeout := learnTimeout

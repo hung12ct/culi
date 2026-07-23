@@ -25,7 +25,7 @@ Usage:
   culi down <id>                downvote a card (ranks lower, never removed)
   culi import scan|merge|apply  reconcile drifted .claude dirs into the store
   culi export [--check]         regenerate ~/.claude agents/skills from cards
-  culi learn [--from-start]     mine queued session transcripts into candidate cards
+  culi learn [--from-start] [--scan-codex]  mine queued/current or historical sessions
   culi review [--list]          approve/reject mined candidate cards
   culi gen [--repo X] [--target claude|codex|both]  git history → instructions + repo cards
   culi stats [--json]           token accounting, gate economics, learning spend

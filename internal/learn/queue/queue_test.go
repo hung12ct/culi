@@ -69,6 +69,27 @@ func TestListDoneFailLadder(t *testing.T) {
 	}
 }
 
+func TestEnqueueStableAndReadable(t *testing.T) {
+	dir := t.TempDir()
+	job := Job{
+		SessionID: "codex:s1", TranscriptPath: "/tmp/codex.jsonl", CWD: "/repo",
+		Source: "codex", Trigger: "session-end", EnqueuedAt: "2026-07-23T00:00:00Z",
+	}
+	if err := Enqueue(dir, job); err != nil {
+		t.Fatal(err)
+	}
+	if err := Enqueue(dir, job); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := List(dir)
+	if err != nil || len(jobs) != 1 {
+		t.Fatalf("jobs=%+v err=%v", jobs, err)
+	}
+	if jobs[0].SessionID != "codex:s1" || jobs[0].EffectiveSource() != "codex" || !jobs[0].IsFinal() {
+		t.Fatalf("job=%+v", jobs[0])
+	}
+}
+
 func TestListParksMalformedJob(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "bad.json"), []byte("{not json"), 0o644); err != nil {
