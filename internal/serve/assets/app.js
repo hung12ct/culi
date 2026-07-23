@@ -1,4 +1,4 @@
-/* culi Review Console — vanilla reimplementation of the design prototype.
+/* culi Context Control — embedded product UI.
    No framework, no build step: served by `culi serve` from embed.FS, and opens
    standalone (file://) via the SEED fallback when /api is unreachable.
 
@@ -9,15 +9,31 @@
 
 'use strict';
 
-// ---------- token maps (mirror README "Design Tokens") ----------
+// ---------- product tokens ----------
+const COLOR = {
+  primary: '#4f6fed', success: '#169b6b', warning: '#c97a16', danger: '#dc4c4c', neutral: '#7c8799',
+};
 const TYPE = {
-  rule:   ['R', '#3ec7bb'], style:  ['S', '#6db4ff'], lesson: ['L', '#e0a24e'],
-  pattern:['P', '#c79bff'], skill:  ['K', '#57c785'], agent:  ['A', '#ff7ea8'],
+  rule:   ['R', '#3973db'], style:  ['S', '#0f8ca8'], lesson: ['L', '#c97a16'],
+  pattern:['P', '#7c5ce0'], skill:  ['K', '#169b6b'], agent:  ['A', '#d65383'],
 };
 const STATUS = {
   confirmed: ['Confirmed', 'confirmed'], candidate: ['Candidate', 'candidate'], retired: ['Retired', 'retired'],
 };
-const STATUS_COLOR = { confirmed: '#47d1c4', candidate: '#e6ac5c', retired: '#7b7b84' };
+const STATUS_COLOR = { confirmed: COLOR.success, candidate: COLOR.warning, retired: COLOR.neutral };
+
+const ICONS = {
+  home: '<path d="M3.5 10.5 12 3l8.5 7.5"/><path d="M5.5 9.5V21h13V9.5M9.5 21v-7h5v7"/>',
+  review: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m7.5 12 3 3 6-6"/>',
+  knowledge: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5A2.5 2.5 0 0 1 20 22Z"/>',
+  activity: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/><path d="M4 4v16h16"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1V21H9.55v-.09A1.7 1.7 0 0 0 8.4 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1-.4H2.3V9.55h.09A1.7 1.7 0 0 0 4 8.4a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.46 3.6l.06.06A1.7 1.7 0 0 0 8.4 4a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1V2.3h4.05v.09A1.7 1.7 0 0 0 15 4a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.4a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1 .4h.09v4.05H21a1.7 1.7 0 0 0-1.6 1.15Z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
+};
+
+function uiIcon(name) {
+  return `<svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[name] || ''}</svg>`;
+}
 
 function alpha(hex, a) {
   const n = parseInt(hex.slice(1), 16);
@@ -35,13 +51,14 @@ function scopeTier(label) {
   return 'global';
 }
 function typeIcon(type, cls) {
-  const [letter, color] = TYPE[type] || ['?', '#8a8a93'];
+  const [letter, color] = TYPE[type] || ['?', COLOR.neutral];
   return `<span class="ticon ${cls || ''} mono" style="background:${alpha(color, 0.16)};color:${color};">${letter}</span>`;
 }
 function scopeChip(label, lg) {
   return `<span class="chip ${lg ? 'chip-lg' : ''} scope-${scopeTier(label)}">${esc(label)}</span>`;
 }
 function scopeChips(labels, lg) { return (labels || []).map(l => scopeChip(l, lg)).join(''); }
+function fmtCount(n) { return Number(n || 0).toLocaleString(); }
 
 // destrBtn renders a destructive button that arms on first click. When its act
 // is the one awaiting confirmation, it flips to a pulsing red "Confirm?" —
@@ -53,11 +70,11 @@ function destrBtn(act, label, cls) {
 
 // ---------- app state ----------
 const state = {
-  screen: 'review',
+  screen: 'overview',
   queueIndex: 0,
   reviewed: 0,
-  editing: false,
   kbId: null,
+  kbMode: 'cards',
   kbSearch: '',
   kbEditing: false,
   typeFilter: {},
@@ -76,12 +93,41 @@ const state = {
   confirm: null, // act string of a destructive button awaiting a second click
   reposOpen: false,
   repos: null, // [{path,name,exists,isGit}] loaded from /api/repos
+  analytics: null,
+  analyticsLoading: false,
+  analyticsRequest: 0,
+  analyticsHarness: '',
+  analyticsRepo: '',
   // data caches (populated from /api or SEED)
   status: null, overview: null, candidates: null,
   cards: null, cardDetail: {}, sessions: null, runs: null, settings: null,
+  settingsDraft: null,
 };
 let toastTimer = null;
 let confirmTimer = null;
+const THEME_KEY = 'culi-theme';
+
+function syncThemeControl() {
+  const btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  const dark = document.documentElement.dataset.theme === 'dark';
+  const label = dark ? 'Use light mode' : 'Use dark mode';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+function setTheme(theme, persist) {
+  document.documentElement.dataset.theme = theme;
+  if (persist) {
+    try { localStorage.setItem(THEME_KEY, theme); } catch (_) { /* private mode can deny storage */ }
+  }
+  syncThemeControl();
+}
+
+function toggleTheme() {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  setTheme(next, true);
+}
 
 // ---------- api layer (falls back to SEED on any failure) ----------
 async function api(path, opts) {
@@ -91,6 +137,17 @@ async function api(path, opts) {
 }
 async function loadStatus()    { try { return await api('/api/status'); }    catch { return SEED.status; } }
 async function loadOverview()  { try { return await api('/api/overview'); }  catch { return SEED.overview; } }
+async function loadAnalytics() {
+  const q = new URLSearchParams();
+  if (state.analyticsHarness) q.set('harness', state.analyticsHarness);
+  if (state.analyticsRepo) q.set('repo', state.analyticsRepo);
+  const qs = q.toString();
+  try { return await api('/api/analytics' + (qs ? '?' + qs : '')); }
+  catch {
+    if (typeof location !== 'undefined' && location.protocol === 'file:') return SEED.analytics;
+    return { available: false, reason: 'Activity data is temporarily unavailable', range: 'Last 7 days', cards: [], repos: [], harnesses: [] };
+  }
+}
 async function loadCandidates(){ try { return await api('/api/candidates'); }catch { return SEED.candidates; } }
 async function loadCards()     { try { return await api('/api/cards'); }     catch { return SEED.cards; } }
 async function loadCard(id)    { try { return await api('/api/cards/' + encodeURIComponent(id)); } catch { return (SEED.cards.find(c => c.id === id) || null); } }
@@ -134,18 +191,18 @@ async function postJSON(path, body) {
 
 // ---------- shell rendering ----------
 const NAV = [
-  { key: 'overview', label: 'Overview',       icon: '◎' },
-  { key: 'review',   label: 'Review',         icon: '❯' },
-  { key: 'kb',       label: 'Knowledge Base', icon: '▤' },
-  { key: 'activity', label: 'Activity',       icon: '◷' },
-  { key: 'settings', label: 'Settings',       icon: '⚙' },
+  { key: 'overview', label: 'Home',           icon: 'home' },
+  { key: 'review',   label: 'Review',         icon: 'review' },
+  { key: 'kb',       label: 'Knowledge',      icon: 'knowledge' },
+  { key: 'activity', label: 'Activity',       icon: 'activity' },
+  { key: 'settings', label: 'Settings',       icon: 'settings' },
 ];
 const TITLES = {
-  overview: ['Overview', 'health snapshot'],
-  review:   ['Review', () => `${(state.candidates || []).length} candidates mined from your sessions`],
-  kb:       ['Knowledge Base', () => `${(state.status && state.status.cards) || (state.cards || []).length} cards`],
-  activity: ['Activity', 'what culi has been doing'],
-  settings: ['Settings', 'safe knobs · config.yaml'],
+  overview: ['Home', 'your context system at a glance'],
+  review:   ['Review', () => `${(state.candidates || []).length} proposed lessons waiting for you`],
+  kb:       ['Knowledge', () => state.kbMode === 'analytics' ? 'delivery analytics across agents and repositories' : `${(state.status && state.status.cards) || (state.cards || []).length} reusable cards`],
+  activity: ['Activity', 'see what Culi sent, learned, and why'],
+  settings: ['Settings', 'tune retrieval and learning safely'],
 };
 
 function renderStrip() {
@@ -155,7 +212,6 @@ function renderStrip() {
   set('s-saved', st.savedPct != null ? st.savedPct : '—');
   set('s-review', (state.candidates ? state.candidates.length : (st.toReview != null ? st.toReview : '—')));
   set('s-learn', st.toLearn != null ? st.toLearn : '—');
-  set('s-addr', st.addr || 'localhost:7378');
   const dot = document.getElementById('serve-dot');
   if (dot) dot.classList.toggle('down', st.serveDown === true);
   const failed = document.getElementById('s-failed');
@@ -167,12 +223,13 @@ function renderStrip() {
 }
 function renderNav() {
   const wrap = document.getElementById('nav-items');
-  const nCand = (state.candidates || []).length;
+  const st = state.status || {};
+  const nCand = state.candidates ? state.candidates.length : (st.toReview || 0);
   wrap.innerHTML = NAV.map(n => {
     const active = state.screen === n.key;
     const badge = n.key === 'review' && nCand > 0 ? `<span class="nav-badge">${nCand}</span>` : '';
     return `<button class="nav-item ${active ? 'active' : ''}" data-act="nav:${n.key}">
-      <span class="nav-icon">${n.icon}</span><span class="nav-label">${n.label}</span>${badge}
+      <span class="nav-icon">${uiIcon(n.icon)}</span><span class="nav-label">${n.label}</span>${badge}
     </button>`;
   }).join('');
 }
@@ -197,9 +254,69 @@ function renderHeader() {
   }
 }
 
+// ---------- Knowledge Pulse ----------
+function harnessClass(code) { return String(code || 'other').toLowerCase().replace(/[^a-z0-9_-]/g, '-'); }
+
+function analyticsFilters(a) {
+  const harnesses = (a && a.harnesses) || [];
+  const harnessButtons = [{ code: '', label: 'All agents' }, ...harnesses].map(h =>
+    `<button class="pulse-filter ${state.analyticsHarness === h.code ? 'active' : ''}" data-act="analyticsHarness:${esc(h.code || 'all')}">${esc(h.label)}</button>`
+  ).join('');
+  const repoOptions = ['<option value="">All repositories</option>'].concat(
+    (((a && a.repos) || []).map(r => `<option value="${esc(r.key)}"${state.analyticsRepo === r.key ? ' selected' : ''}>${esc(r.label)}</option>`))
+  ).join('');
+  return `<div class="pulse-filters" aria-label="Knowledge Pulse filters">
+    <div class="pulse-filter-group">${harnessButtons}</div>
+    <select class="pulse-repo" data-change="analyticsRepo" aria-label="Filter Knowledge Pulse by repository">${repoOptions}</select>
+  </div>`;
+}
+
+function analyticsChart(a, limit) {
+  const cards = ((a && a.cards) || []).slice(0, limit || 10);
+  if (!cards.length) return `<div class="pulse-empty"><span class="pulse-empty-mark">↗</span><b>No cards delivered in this view</b><span>Try another agent or repository. Gate skips are not counted as deliveries.</span></div>`;
+  const max = Math.max(1, ...cards.map(c => Number(c.sessions || 0)));
+  return `<div class="pulse-chart">${cards.map((c, i) => {
+    const segments = (c.harnesses || []).map(h =>
+      `<span class="pulse-bar-segment harness-${harnessClass(h.code)}" style="width:${Math.max(3, (Number(h.sessions || 0) / max) * 100)}%" title="${esc(h.label)} · ${fmtCount(h.sessions)} sessions · ${fmtCount(h.deliveries)} deliveries"></span>`
+    ).join('');
+    const name = c.available
+      ? `<button class="pulse-card-link" data-act="analyticsCard:${esc(c.short)}" title="Open ${esc(c.id)}">${esc(c.title)}</button>`
+      : `<span class="pulse-card-link unavailable" title="This card is no longer in the knowledge base">${esc(c.title)}</span>`;
+    return `<div class="pulse-chart-row">
+      <span class="pulse-rank mono">${i + 1}</span>
+      <div class="pulse-card-name">${name}<span class="pulse-card-meta">${esc(c.type)}${c.repos && c.repos.length ? ' · ' + esc(c.repos.join(', ')) : ''}${c.available ? '' : ' · removed'}</span></div>
+      <div class="pulse-bar-track">${segments}</div>
+      <div class="pulse-row-stat"><b>${fmtCount(c.sessions)}</b><span>session${Number(c.sessions) === 1 ? '' : 's'}</span></div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function analyticsStatus(a, body) {
+  if (state.analyticsLoading && !a) return `<div class="pulse-loading"><span></span><span></span><span></span></div>`;
+  if (a && a.available === false) return `<div class="pulse-unavailable"><b>Knowledge Pulse is unavailable</b><span>${esc(a.reason || 'Activity data could not be read. Refresh to try again.')}</span></div>`;
+  return body;
+}
+
+function homeAnalytics() {
+  const a = state.analytics;
+  const summary = (a && a.summary) || {};
+  return `<section class="pulse-card card" aria-labelledby="pulse-home-title">
+    <div class="pulse-head">
+      <div><div class="pulse-eyebrow">Knowledge Pulse · ${esc((a && a.range) || 'Last 7 days')}</div>
+        <h3 id="pulse-home-title">Hot cards across your coding agents</h3>
+        <p>Ranked by distinct sessions, then deliveries and recency.</p></div>
+      <button class="btn btn-outline pulse-open" data-act="kbAnalytics">Open analytics →</button>
+    </div>
+    ${analyticsFilters(a)}
+    ${analyticsStatus(a, `<div class="pulse-summary-line"><b>${fmtCount(summary.activeCards)}</b> cards used <span>·</span> <b>${fmtCount(summary.sessions)}</b> sessions <span>·</span> <b>${fmtCount(summary.tokens)}</b> tokens delivered</div>${analyticsChart(a, 5)}`)}
+  </section>`;
+}
+
 // ---------- overview ----------
 function screenOverview() {
   const o = state.overview || SEED.overview;
+  const st = state.status || {};
+  const cf = o.cf || { injected: 0, sessions: 0, vsAll: 0 };
   // Go marshals empty slices as JSON null (not []), so any of these can arrive
   // null from /api/overview. Guard every .map — one throw here aborts
   // renderScreen() *after* renderHeader() ran, leaving the previous screen's
@@ -210,13 +327,19 @@ function screenOverview() {
       <div class="tile-val" style="color:${t.color}">${esc(t.value)}</div>
       <div class="tile-sub">${esc(t.sub)}</div></div>`).join('');
   const g = o.granularity;
+  const failedCount = (o.failedJobs || []).length;
+  const reviewCount = (state.candidates || []).length || st.toReview || 0;
+  const hasInjectionHistory = Number(String(cf.sessions || 0).replace(/,/g, '')) > 0;
+  const healthTitle = failedCount ? 'Learning needs attention' : 'Culi is working in the background';
+  const healthCopy = failedCount
+    ? 'Context delivery is still available. Check the failed learning job when you are ready.'
+    : 'Relevant knowledge is ready for your coding agents. You stay in control of what Culi keeps.';
   const failed = (o.failedJobs && o.failedJobs.length) ? `
     <div class="failed">
       <div class="failed-head"><span class="ic">⚠</span><span class="tt">${o.failedJobs.length} failed job${o.failedJobs.length === 1 ? '' : 's'}</span></div>
       <div class="failed-line">${esc(o.failedJobs[0].kind)} — <span class="mono">${esc(o.failedJobs[0].at)}</span></div>
       <div class="failed-sub">${esc(o.failedJobs[0].reason)}</div>
-      <div class="failed-btns"><button class="btn btn-red" data-act="retry">Retry</button>
-        <button class="btn btn-outline" data-act="viewlog">View log</button></div>
+      <div class="failed-help mono">Run: culi learn</div>
     </div>` : '';
   const noisy = (o.noisy || []).map(c => {
     const nm = c.short
@@ -225,7 +348,7 @@ function screenOverview() {
     return `<div class="attn-row">${nm}
       <span class="score-pill">${esc(c.score)}</span>
       <button class="btn btn-outline" data-act="down:${esc(c.id || '')}">Down</button>
-      ${destrBtn('reject-noisy:' + (c.id || ''), 'Reject', 'btn btn-red-outline')}</div>`;
+      ${destrBtn('reject-noisy:' + (c.id || ''), 'Retire', 'btn btn-red-outline')}</div>`;
   }).join('');
   const stale = (o.stale || []).map(c => {
     const link = c.short ? `data-act="ovCard:${esc(c.short)}" role="button" tabindex="0" title="Open ${esc(c.name)} in the Knowledge Base"` : '';
@@ -234,14 +357,30 @@ function screenOverview() {
       <span class="attn-last">last ${esc(c.last)}</span></div>`;
   }).join('');
   return `<div class="ov">
-    <div class="ov-row">
-      <div class="hero">
-        <div class="hero-label">Context saved · last 7 days</div>
-        <div class="hero-num-row"><div class="hero-num">${esc(o.savedPct)}</div><div class="hero-spark">${trend}</div></div>
-        <div class="hero-cf" title="Baseline = loading your whole knowledge base into every session (the always-on CLAUDE.md approach culi replaces). culi injects only the cards relevant to each prompt. It does not shrink a CLAUDE.md you keep separately — move that content into cards to save it."><b>${esc(o.cf.injected)}</b> tokens injected across <b>${esc(o.cf.sessions)}</b> sessions — versus <b>${esc(o.cf.vsAll)}</b> if your whole knowledge base loaded every session.</div>
+    <div class="home-hero ${failedCount ? 'warn' : ''}">
+      <div class="home-status">
+        <div class="health-label"><span class="health-dot"></span>${failedCount ? 'Needs attention' : 'System healthy'}</div>
+        <h2>${healthTitle}</h2>
+        <p>${healthCopy}</p>
+        <div class="home-tags"><span>Local-first</span><span>Cross-harness</span><span>${esc(st.toLearn || 0)} queued to learn</span></div>
+        <div class="home-actions">
+          ${reviewCount ? `<button class="btn home-primary" data-act="nav:review">Review ${reviewCount} lesson${reviewCount === 1 ? '' : 's'}</button>` : `<button class="btn home-primary" data-act="nav:kb">Browse knowledge</button>`}
+          <button class="btn btn-outline" data-act="nav:activity">View activity</button>
+        </div>
       </div>
-      <div class="tiles">${tiles}</div>
+      <div class="efficiency">
+        <div class="efficiency-label">Context avoided · last 7 days</div>
+        ${hasInjectionHistory ? `
+          <div class="hero-num-row"><div class="hero-num">${esc(o.savedPct)}</div><div class="hero-spark">${trend}</div></div>
+          <div class="hero-cf" title="Culi compares targeted injection with loading the whole knowledge base every session."><b>${esc(cf.injected)}</b> tokens delivered across <b>${esc(cf.sessions)}</b> sessions instead of <b>${esc(cf.vsAll)}</b>.</div>
+        ` : `
+          <div class="efficiency-empty-title">No injection history yet</div>
+          <div class="efficiency-empty-copy">This metric appears after Culi delivers relevant knowledge to Claude or Codex. Gate skips do not count as injections.</div>
+        `}
+      </div>
     </div>
+    <div class="tiles home-tiles">${tiles}</div>
+    ${homeAnalytics()}
     <div class="ov-row">
       <div class="card gran">
         <div class="gran-head"><div class="gran-title">Injection granularity</div><div class="gran-note">packer is degrading gracefully</div></div>
@@ -280,16 +419,16 @@ function screenReview() {
     return `<button class="q-row ${sel ? 'sel' : ''}" data-act="selCand:${i}">
       <div class="q-row-top">${typeIcon(c.type, 'ticon-16')}
         <span class="q-shortid">${esc(c.id)}</span><span class="spacer"></span>
-        <span class="draft-tag">DRAFT</span></div>
+        <span class="draft-tag">PROPOSED</span></div>
       <div class="q-title">${esc(c.title)}</div>
       <div class="q-scopes">${scopeChips(c.scopeLabels)}<span class="q-ago">${esc(c.ago)}</span></div>
     </button>`;
   }).join('');
   const queueBody = cands.length ? rows : `<div class="queue-empty">Nothing queued.</div>`;
   const queue = `<div class="queue">
-    <div class="queue-head"><span class="t">Candidate queue</span><span class="n">${cands.length} left</span></div>
+    <div class="queue-head"><span class="t">Review inbox</span><span class="n">${cands.length} left</span></div>
     <div class="queue-list">${queueBody}</div>
-    <div class="queue-foot"><span class="mono"><b>j/k</b> move</span><span class="mono"><b>a</b> approve</span><span class="mono"><b>r</b> reject</span><span class="mono"><b>e</b> edit</span></div>
+    <div class="queue-foot"><span class="mono"><b>j/k</b> move</span><span class="mono"><b>a</b> approve</span><span class="mono"><b>r</b> reject</span></div>
   </div>`;
 
   let focus;
@@ -301,24 +440,13 @@ function screenReview() {
       <div class="caught-sub">${state.reviewed} reviewed · nothing left to triage.</div>
     </div></div>`;
   } else {
-    const editPanel = state.editing ? `
-      <div class="edit">
-        <div class="edit-head"><span class="t">Quick-fix before approving</span><a data-act="noop">Open full editor →</a></div>
-        <label>Title</label><input id="edit-title" value="${esc(cur.title)}" />
-        <div class="edit-2col">
-          <div><label>Scope</label><input id="edit-scope" class="mono" value="${esc((cur.scopeLabels || []).join(' '))}" /></div>
-          <div><label>Type</label><input id="edit-type" class="mono" value="${esc(cur.type)}" /></div>
-        </div>
-        <label>Trigger keywords</label><input id="edit-keywords" class="mono" value="${esc((cur.keywords || []).join(', '))}" />
-        <div class="edit-btns"><button class="btn-teal" data-act="saveEdit">Save fixes</button><button class="btn-outline" data-act="cancelEdit">Cancel</button></div>
-      </div>` : '';
-    const body = state.editing ? '' : `<div class="cand-body md-body">${cur.body || ''}</div>`;
+    const body = `<div class="cand-body md-body">${cur.body || ''}</div>`;
     const supersedes = cur.supersedes ? `
       <div class="supersedes"><div class="lbl">Approving this retires ↓</div>
         <div class="row"><span class="id">${esc(cur.supersedes.id)}</span><span class="title">${esc(cur.supersedes.title)}</span></div></div>` : '';
     focus = `<div class="focus"><div class="focus-pad">
       <div class="cand">
-        <div class="cand-head"><span class="cand-draft">DRAFT CANDIDATE</span><span class="cand-guess">culi's guess — unconfirmed</span><span class="spacer"></span><span class="cand-id">${esc(cur.id)}</span></div>
+        <div class="cand-head"><span class="cand-draft">PROPOSED LESSON</span><span class="cand-guess">From session evidence · you decide</span><span class="spacer"></span><span class="cand-id">${esc(cur.id)}</span></div>
         <h2 class="cand-title">${esc(cur.title)}</h2>
         <div class="cand-summary">${esc(cur.summary)}</div>
         <div class="cand-meta">
@@ -326,7 +454,7 @@ function screenReview() {
           ${scopeChips(cur.scopeLabels, true)}
           <span class="cand-obs">observations: <b>${esc(cur.observations)}</b></span>
         </div>
-        ${editPanel}${body}${supersedes}
+        ${body}${supersedes}
         <div class="prov">
           <div class="prov-title">Provenance</div>
           <div class="prov-grid">
@@ -343,7 +471,7 @@ function screenReview() {
         <button class="act-reject" data-act="reject">Reject <span class="act-key">r</span></button>
         <button class="act-skip" data-act="skip">Skip <span class="act-key">s</span></button>
         <div class="spacer"></div>
-        <button class="act-edit" data-act="startEdit">Edit <span class="act-key">e</span></button>
+        <button class="act-edit" data-act="editCandidate">Open editor</button>
       </div>
     </div></div>`;
   }
@@ -394,7 +522,57 @@ function updateKbList() {
   const count = document.getElementById('kb-count');
   if (count) count.textContent = list.length;
 }
+
+function knowledgeModeBar() {
+  return `<div class="kb-modebar">
+    <div class="segmented kb-modes" aria-label="Knowledge view">
+      <button class="seg ${state.kbMode === 'cards' ? 'active' : ''}" data-act="kbMode:cards">Cards</button>
+      <button class="seg ${state.kbMode === 'analytics' ? 'active' : ''}" data-act="kbMode:analytics">Analytics</button>
+    </div>
+    <span>${state.kbMode === 'analytics' ? 'See which knowledge Culi actually delivers' : 'Browse, inspect, and manage reusable knowledge'}</span>
+  </div>`;
+}
+
+function screenKnowledgeAnalytics() {
+  const a = state.analytics;
+  const summary = (a && a.summary) || {};
+  const rows = ((a && a.cards) || []).slice(0, 20).map((c, i) => {
+    const agentSplit = (c.harnesses || []).map(h => `<span class="pulse-agent-dot harness-${harnessClass(h.code)}"></span>${esc(h.label)} ${fmtCount(h.sessions)}`).join('<span class="pulse-split">·</span>');
+    const title = c.available
+      ? `<button class="pulse-table-link" data-act="analyticsCard:${esc(c.short)}">${esc(c.title)}</button><span class="mono pulse-id">${esc(c.id)}</span>`
+      : `<span class="pulse-table-link unavailable">${esc(c.title)}</span><span class="pulse-removed">removed</span>`;
+    return `<tr>
+      <td class="mono pulse-table-rank">${i + 1}</td><td>${title}</td>
+      <td class="pulse-table-num">${fmtCount(c.sessions)}</td><td class="pulse-table-num">${fmtCount(c.deliveries)}</td>
+      <td class="pulse-table-num">${fmtCount(c.tokens)}</td><td class="pulse-agents">${agentSplit || '—'}</td><td>${esc(c.lastUsed || '—')}</td>
+    </tr>`;
+  }).join('');
+  const content = `<div class="pulse-kpis">
+      <div><span>Cards used</span><b>${fmtCount(summary.activeCards)}</b></div>
+      <div><span>Sessions</span><b>${fmtCount(summary.sessions)}</b></div>
+      <div><span>Deliveries</span><b>${fmtCount(summary.deliveries)}</b></div>
+      <div><span>Tokens delivered</span><b>${fmtCount(summary.tokens)}</b></div>
+      <div><span>Cross-agent cards</span><b>${fmtCount(summary.crossHarnessCards)}</b></div>
+    </div>
+    <section class="pulse-detail-card card">
+      <div class="pulse-section-head"><div><h3>Most useful cards</h3><p>Distinct sessions are the strongest signal; repeated deliveries in one session do not inflate the ranking.</p></div><span>${esc((a && a.range) || 'Last 7 days')}</span></div>
+      ${analyticsChart(a, 10)}
+    </section>
+    <section class="pulse-table-card card">
+      <div class="pulse-section-head"><div><h3>Card activity</h3><p>Up to 20 cards in the current agent and repository view.</p></div></div>
+      ${rows ? `<div class="pulse-table-wrap"><table class="pulse-table"><thead><tr><th>#</th><th>Card</th><th>Sessions</th><th>Deliveries</th><th>Tokens</th><th>Agent split</th><th>Last used</th></tr></thead><tbody>${rows}</tbody></table></div>` : analyticsChart(a, 20)}
+    </section>`;
+  return `<div class="pulse-page">
+    <div class="pulse-page-head"><div><div class="pulse-eyebrow">Knowledge Pulse</div><h2>What Culi is using</h2><p>Real delivery activity across Claude Code and Codex. Filters are shared with Home.</p></div>${analyticsFilters(a)}</div>
+    ${analyticsStatus(a, content)}
+  </div>`;
+}
+
 function screenKb() {
+  return `<div class="kb-shell">${knowledgeModeBar()}${state.kbMode === 'analytics' ? screenKnowledgeAnalytics() : screenKbCards()}</div>`;
+}
+
+function screenKbCards() {
   const filtered = kbFiltered();
   if (!state.kbId && filtered.length) state.kbId = filtered[0].id;
 
@@ -418,7 +596,7 @@ function screenKb() {
   }).join('');
 
   const staleCount = cards.filter(c => c.stale).length;
-  const staleColor = '#5fe0d3';
+  const staleColor = COLOR.primary;
   const staleStyle = state.staleFilter ? `background:${alpha(staleColor, 0.14)};border-color:${alpha(staleColor, 0.45)};color:${staleColor};` : '';
   const staleFacet = `<button class="tfacet ${state.staleFilter ? 'on' : ''}" style="${staleStyle}" data-act="facetStale">
     <span class="dot" style="background:${staleColor}"></span><span class="tfacet-label">stale</span><span class="tfacet-count">${staleCount}</span></button>`;
@@ -432,7 +610,7 @@ function screenKb() {
     <div class="kb-list">
       <div class="kb-filter">
         <div class="kb-search-wrap">
-          <span class="kb-search-icon">⌕</span>
+          <span class="kb-search-icon">${uiIcon('search')}</span>
           <input id="kb-search" class="kb-search" placeholder="Search cards…  ( / )" value="${esc(state.kbSearch)}" autocomplete="off" spellcheck="false" />
           <span class="kb-search-count mono" id="kb-count">${filtered.length}</span>
         </div>
@@ -641,7 +819,7 @@ function screenActivity() {
         <div class="act-empty-s">Widen the repo or date range to see more recent activity.</div></div>`
       : `<div class="act-empty"><div class="act-empty-ic">◷</div>
         <div class="act-empty-t">No injections logged yet</div>
-        <div class="act-empty-s">Work in a watched repo and culi's injections will show up here, grouped by conversation.</div></div>`);
+        <div class="act-empty-s">Start a Claude or Codex session and Culi's injections will appear here, grouped by conversation.</div></div>`);
   } else {
     const runs = (state.runs || []).map(r =>
       `<div class="run ${r.failed ? 'failed' : ''}"><span class="dot" style="background:${r.dot}"></span>
@@ -656,26 +834,93 @@ function screenActivity() {
 }
 
 // ---------- settings ----------
+function settingValue(key, fallback) {
+  const draft = state.settingsDraft;
+  return draft && Object.prototype.hasOwnProperty.call(draft, key) ? draft[key] : (fallback == null ? '' : fallback);
+}
+
+function captureSettingsDraft() {
+  const draft = Object.assign({}, state.settingsDraft || {});
+  document.querySelectorAll('.set-input').forEach(i => { draft[i.dataset.key] = i.value; });
+  state.settingsDraft = draft;
+  return draft;
+}
+
+function setLearningProvider(code) {
+  const s = state.settings || SEED.settings;
+  const learning = s.learning || {};
+  const selected = (learning.backends || []).find(b => b.code === code);
+  if (!selected) return;
+  const draft = captureSettingsDraft();
+  draft.provider = code;
+  draft.cheap_model = selected.cheapModel || draft.cheap_model || '';
+  draft.strong_model = selected.strongModel || draft.strong_model || '';
+  renderScreen();
+}
+
+function learningCredential(provider, learning) {
+  if (provider === 'openai') return `<label class="learning-field learning-field-wide">
+    <span>API key file <em>optional when OPENAI_API_KEY is set</em></span>
+    <input class="set-input" data-key="openai_api_key_file" value="${esc(settingValue('openai_api_key_file', learning.openaiApiKeyFile))}" placeholder="~/.culi/secrets/openai.key" autocomplete="off" />
+  </label>`;
+  if (provider === 'anthropic') return `<label class="learning-field learning-field-wide">
+    <span>API key file <em>optional when ANTHROPIC_API_KEY is set</em></span>
+    <input class="set-input" data-key="anthropic_api_key_file" value="${esc(settingValue('anthropic_api_key_file', learning.anthropicApiKeyFile))}" placeholder="~/.culi/secrets/anthropic.key" autocomplete="off" />
+  </label>`;
+  if (provider === 'claude-cli') return `<label class="learning-field learning-field-wide">
+    <span>Headless OAuth token file <em>optional for interactive sessions</em></span>
+    <input class="set-input" data-key="oauth_token_file" value="${esc(settingValue('oauth_token_file', learning.oauthTokenFile))}" placeholder="~/.claude-tokens/account.token" autocomplete="off" />
+  </label>`;
+  if (provider === 'codex-cli') return `<div class="learning-auth-note learning-field-wide"><span class="status-dot ready"></span>
+    Culi uses your existing Codex login. If setup is required, run <code>codex login</code> in a terminal.</div>`;
+  if (provider === 'ollama') return `<div class="learning-auth-note learning-field-wide"><span class="status-dot ready"></span>
+    Generation stays local. Make sure your selected models are pulled in Ollama.</div>`;
+  if (provider === 'auto') return `<div class="learning-auth-note learning-field-wide"><span class="status-dot auto"></span>
+    Auto tries configured API keys first, then signed-in Claude and Codex terminals. Existing credential paths remain unchanged.</div>`;
+  return `<div class="learning-auth-note learning-field-wide"><span class="status-dot off"></span>No transcript mining calls will run.</div>`;
+}
+
 function screenSettings() {
   const s = state.settings || SEED.settings;
-  const groups = s.groups.map(g => {
+  const learning = s.learning || { provider: 'auto', cheapModel: '', strongModel: '', backends: [] };
+  const provider = settingValue('provider', learning.provider || 'auto');
+  const selected = (learning.backends || []).find(b => b.code === provider) || (learning.backends || [])[0] || {};
+  const backends = (learning.backends || []).map(b => `<button type="button" class="backend-option ${b.code === provider ? 'selected' : ''}" data-act="setProvider:${esc(b.code)}" aria-pressed="${b.code === provider}">
+    <span class="backend-mark mark-${esc(b.code)}">${esc(b.mark)}</span>
+    <span class="backend-copy"><span class="backend-name">${esc(b.label)}</span><span class="backend-desc">${esc(b.description)}</span></span>
+    <span class="backend-meta"><span class="backend-status tone-${esc(b.tone)}"><i></i>${esc(b.status)}</span><span>${esc(b.billing)}</span></span>
+  </button>`).join('');
+  const groups = (s.groups || []).map(g => {
     const rows = g.items.map(i => {
       const control = i.key === 'repos'
         ? `<button class="btn btn-outline set-repos-btn" data-act="openRepos">Manage…<span class="faint mono">${esc(i.value || '')}</span></button>`
-        : `<input class="set-input" style="width:${i.width}" data-key="${esc(i.key)}" value="${esc(i.value)}" />`;
-      return `<div class="set-row"><div style="flex:1"><div class="set-key">${esc(i.key)}</div><div class="set-desc">${esc(i.desc)}</div></div>${control}</div>`;
+        : `<input class="set-input" data-key="${esc(i.key)}" value="${esc(settingValue(i.key, i.value))}" />`;
+      return `<div class="set-row"><div class="set-copy"><div class="set-key">${esc(i.key)}</div><div class="set-desc">${esc(i.desc)}</div></div>${control}</div>`;
     }).join('');
-    return `<div class="set-group"><div class="set-group-title">${esc(g.title)}</div><div class="set-card">${rows}</div></div>`;
+    return `<section class="set-group"><div class="set-group-title">${esc(g.title)}</div><div class="set-card">${rows}</div></section>`;
   }).join('');
   const spent = s.spendToday != null ? s.spendToday : 0.14;
   const cap = s.spendCap != null ? s.spendCap : 1.0;
   const pct = cap > 0 ? Math.min(100, Math.round((spent / cap) * 100)) : 0;
   return `<div class="settings">
-    <div class="settings-note">Writes go to <span class="mono">config.yaml</span>. Values below are the safe knobs.</div>
-    ${groups}
-    <div class="set-spend"><div class="set-spend-head"><span>Spend today vs daily cap</span><span class="amt">$${spent.toFixed(2)} / $${cap.toFixed(2)}</span></div>
-      <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div></div>
-    <div class="set-btns"><button class="btn btn-teal" data-act="saveConfig">Save to config.yaml</button><button class="btn btn-outline" data-act="revertConfig">Revert</button></div>
+    <div class="settings-hero"><div><span class="settings-eyebrow">Learning &amp; retrieval</span><h2>Make Culi work your way</h2><p>Choose how conversations become reusable knowledge, then tune the guardrails around it.</p></div><span class="config-location"><i></i><span>Local config</span><code>~/.culi/config.yaml</code></span></div>
+    <section class="learning-panel">
+      <div class="settings-section-head"><div><span class="settings-step">01</span><h3>Learning backend</h3><p>The model Culi uses after a session to extract durable lessons. Retrieval hooks stay fast and local.</p></div><span class="learning-privacy">Secrets never enter this page</span></div>
+      <div class="backend-grid">${backends}</div>
+      <div class="learning-config">
+        <input class="set-input" type="hidden" data-key="provider" value="${esc(provider)}" />
+        <div class="learning-config-head"><div><span>Selected backend</span><strong>${esc(selected.label || provider)}</strong></div><span class="learning-selected-auth">${esc(selected.auth || '')}</span></div>
+        <div class="learning-model-grid">
+          <label class="learning-field"><span>Routine model <em>high-volume mining</em></span><input class="set-input" data-key="cheap_model" value="${esc(settingValue('cheap_model', learning.cheapModel))}" /></label>
+          <label class="learning-field"><span>Escalation model <em>schema retry</em></span><input class="set-input" data-key="strong_model" value="${esc(settingValue('strong_model', learning.strongModel))}" /></label>
+          ${learningCredential(provider, learning)}
+        </div>
+      </div>
+    </section>
+    <div class="settings-section-head tune-head"><div><span class="settings-step">02</span><h3>Safety &amp; retrieval</h3><p>Control injection size, learning limits, card lifecycle, and watched repositories.</p></div></div>
+    <div class="settings-grid">${groups}</div>
+    <div class="set-spend"><div class="set-spend-copy"><span>Today’s metered learning spend</span><small>CLI subscriptions and local Ollama calls remain $0 here.</small></div><div class="set-spend-meter"><div class="set-spend-head"><span>${pct}% of daily cap</span><span class="amt">$${spent.toFixed(2)} / $${cap.toFixed(2)}</span></div><div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div></div></div>
+    <div class="set-btns"><div><strong>Ready to apply?</strong><span>Only safe, documented keys are written.</span></div><div class="set-btn-actions"><button class="btn btn-outline" data-act="revertConfig">Discard changes</button><button class="btn btn-teal" data-act="saveConfig">Save settings</button></div></div>
   </div>`;
 }
 
@@ -685,11 +930,38 @@ function renderScreen() { document.getElementById('screen').innerHTML = SCREENS[
 function render() { renderStrip(); renderNav(); renderSpend(); renderHeader(); renderScreen(); }
 
 // ---------- data loaders per screen ----------
+async function fetchAnalyticsIntoState(showLoading) {
+  const request = ++state.analyticsRequest;
+  state.analyticsLoading = true;
+  if (showLoading) state.analytics = null;
+  if (showLoading && (state.screen === 'overview' || (state.screen === 'kb' && state.kbMode === 'analytics'))) renderScreen();
+  const result = await loadAnalytics();
+  if (request !== state.analyticsRequest) return;
+  state.analytics = result;
+  state.analyticsLoading = false;
+  if (state.screen === 'overview' || (state.screen === 'kb' && state.kbMode === 'analytics')) renderScreen();
+}
+
+function beginAnalyticsLoad() {
+  if (state.analytics || state.analyticsLoading) return;
+  fetchAnalyticsIntoState(false);
+}
+
+async function reloadAnalytics() {
+  await fetchAnalyticsIntoState(true);
+}
+
 async function ensure(screen) {
   if (!state.status) state.status = await loadStatus();
-  if (screen === 'overview' && !state.overview) state.overview = await loadOverview();
+  if (screen === 'overview') {
+    if (!state.overview) state.overview = await loadOverview();
+    beginAnalyticsLoad();
+  }
   if (screen === 'review' && !state.candidates) state.candidates = await loadCandidates();
-  if (screen === 'kb' && !state.cards) state.cards = await loadCards();
+  if (screen === 'kb') {
+    if (state.kbMode === 'cards' && !state.cards) state.cards = await loadCards();
+    if (state.kbMode === 'analytics' && !state.analytics && !state.analyticsLoading) await fetchAnalyticsIntoState(false);
+  }
   if (screen === 'activity') {
     if (!state.sessions) {
       const r = await loadSessions();
@@ -708,6 +980,19 @@ async function ensure(screen) {
 async function goto(screen) {
   state.screen = screen;
   await ensure(screen);
+  render();
+}
+
+async function openKnowledgeAnalytics() {
+  state.screen = 'kb';
+  state.kbMode = 'analytics';
+  await ensure('kb');
+  render();
+}
+
+async function setKnowledgeMode(mode) {
+  state.kbMode = mode === 'analytics' ? 'analytics' : 'cards';
+  await ensure('kb');
   render();
 }
 
@@ -730,18 +1015,17 @@ function resolve(verb, dot, apiVerb) {
   const newIdx = Math.min(idx, cands.length - 1);
   state.queueIndex = newIdx < 0 ? 0 : newIdx;
   state.reviewed += 1;
-  state.editing = false;
   state.undoStack = { card: removed, idx, verb };
   if (apiVerb) postAction(`/api/candidates/${encodeURIComponent(removed.id)}/${apiVerb}`);
   render();
   showToast(`${verb} — "${removed.title}"`, dot);
 }
-function approve() { resolve('Approved', '#3ec7bb', 'approve'); }
-function reject()  { resolve('Rejected', '#ff5b52', 'reject'); }
+function approve() { resolve('Approved', COLOR.success, 'approve'); }
+function reject()  { resolve('Rejected', COLOR.danger, 'reject'); }
 function skip() {
   const cands = state.candidates || [];
-  if (cands.length) { state.queueIndex = Math.min(cands.length - 1, state.queueIndex + 1); state.editing = false; render(); }
-  showToast('Skipped — back later', '#8a8a93');
+  if (cands.length) { state.queueIndex = Math.min(cands.length - 1, state.queueIndex + 1); render(); }
+  showToast('Skipped — back later', COLOR.neutral);
 }
 function undo() {
   if (!state.undoStack) { state.toast = null; document.getElementById('toast').hidden = true; return; }
@@ -758,24 +1042,24 @@ function moveSel(d) {
   const n = (state.candidates || []).length;
   if (!n) return;
   state.queueIndex = Math.max(0, Math.min(n - 1, state.queueIndex + d));
-  state.editing = false;
   render();
 }
-function startEdit() { if ((state.candidates || [])[state.queueIndex]) { state.editing = true; render(); } }
-function cancelEdit() { state.editing = false; render(); }
-function saveEdit() {
+async function editCandidate() {
   const cur = (state.candidates || [])[state.queueIndex];
   if (!cur) return;
-  const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
-  cur.title = g('edit-title');
-  const scope = g('edit-scope').trim();
-  if (scope) cur.scopeLabels = scope.split(/\s+/);
-  cur.type = g('edit-type').trim() || cur.type;
-  cur.keywords = g('edit-keywords').split(',').map(s => s.trim()).filter(Boolean);
-  state.editing = false;
-  postAction(`/api/candidates/${encodeURIComponent(cur.id)}/edit`);
-  render();
-  showToast('Saved fixes', '#3ec7bb');
+  drillTo('review');
+  await gotoCard(cur.id);
+  const detail = state.cardDetail[cur.id];
+  if (!detail) {
+    showToast('This candidate is not a persisted card yet — approve it first', COLOR.warning);
+    return;
+  }
+  if (detail.editable === false) {
+    showToast('Edit this hand-authored card in its source file', COLOR.warning);
+    return;
+  }
+  state.kbEditing = true;
+  renderScreen();
 }
 
 // ---------- event delegation ----------
@@ -796,11 +1080,12 @@ function clearConfirm() { state.confirm = null; clearTimeout(confirmTimer); }
 async function cardAction(verb, id, okLabel, okDot) {
   if (!id) return;
   const res = await postJSON('/api/cards/action', { id, action: verb });
-  if (res && res.ok === false) { showToast(res.note || 'not applied', '#e6ac5c'); return; }
+  if (res && res.ok === false) { showToast(res.note || 'not applied', COLOR.warning); return; }
   showToast(okLabel, okDot);
   // Invalidate the caches the action can change, then re-render with fresh data.
   state.cards = null;
   state.overview = null;
+  state.analytics = null;
   if (verb === 'remove') { state.kbId = null; delete state.cardDetail[id]; }
   else { const d = await loadCard(id); if (d) state.cardDetail[id] = d; else delete state.cardDetail[id]; }
   await ensure(state.screen);
@@ -819,6 +1104,17 @@ function handleAction(act) {
   }
   switch (name) {
     case 'nav': state.returnTo = null; goto(arg); return;
+    case 'kbMode': setKnowledgeMode(arg); return;
+    case 'kbAnalytics': state.returnTo = null; openKnowledgeAnalytics(); return;
+    case 'analyticsHarness': {
+      const next = arg === 'all' ? '' : arg;
+      if (state.analyticsHarness !== next) { state.analyticsHarness = next; reloadAnalytics(); }
+      return;
+    }
+    case 'analyticsCard':
+      if (state.screen === 'overview') drillTo('overview');
+      gotoCard(arg);
+      return;
     // In-app back: if a browser-history drill entry exists, pop it (unifies with
     // the physical Back button via popstate); otherwise run the back directly.
     case 'back':
@@ -838,9 +1134,7 @@ function handleAction(act) {
     case 'approve': approve(); return;
     case 'reject': reject(); return;
     case 'skip': skip(); return;
-    case 'startEdit': startEdit(); return;
-    case 'saveEdit': saveEdit(); return;
-    case 'cancelEdit': cancelEdit(); return;
+    case 'editCandidate': editCandidate(); return;
     case 'selCard': selectCard(arg); return;
     case 'facetType': state.typeFilter[arg] = !state.typeFilter[arg]; state.kbId = null; renderScreen(); return;
     case 'facetStatus': state.statusFilter[arg] = !state.statusFilter[arg]; state.kbId = null; renderScreen(); return;
@@ -857,16 +1151,17 @@ function handleAction(act) {
     }
     case 'injCard': drillTo('activity'); gotoCard(arg); return;
     case 'undo': undo(); return;
-    case 'cardDown': cardAction('down', state.kbId, 'Downvoted', '#8a8a93'); return;
-    case 'cardRetire': cardAction('retire', state.kbId, 'Retired (reversible)', '#e6ac5c'); return;
-    case 'cardRemove': cardAction('remove', state.kbId, 'Removed — recoverable from git', '#ff5b52'); return;
-    case 'down': cardAction('down', arg, 'Downvoted', '#8a8a93'); return;
-    case 'reject-noisy': cardAction('retire', arg, 'Retired (reversible)', '#e6ac5c'); return;
-    case 'retry': showToast("Retry isn't wired yet — re-run `culi learn` in a terminal", '#e6ac5c'); return;
-    case 'revert': showToast('Not wired — run `git revert ' + (arg || '') + '` in ~/.culi/knowledge', '#8a8a93'); return;
+    case 'cardDown': cardAction('down', state.kbId, 'Downvoted', COLOR.neutral); return;
+    case 'cardRetire': cardAction('retire', state.kbId, 'Retired (reversible)', COLOR.warning); return;
+    case 'cardRemove': cardAction('remove', state.kbId, 'Removed — recoverable from git', COLOR.danger); return;
+    case 'down': cardAction('down', arg, 'Downvoted', COLOR.neutral); return;
+    case 'reject-noisy': cardAction('retire', arg, 'Retired (reversible)', COLOR.warning); return;
+    case 'revert': showToast('Not wired — run `git revert ' + (arg || '') + '` in ~/.culi/knowledge', COLOR.neutral); return;
+    case 'setProvider': setLearningProvider(arg); return;
     case 'saveConfig': saveConfig(); return;
-    case 'revertConfig': state.settings = null; goto('settings'); return;
+    case 'revertConfig': state.settingsDraft = null; state.settings = null; goto('settings'); return;
     case 'refresh': refresh(); return;
+    case 'toggleTheme': toggleTheme(); return;
     case 'shortcuts': toggleShortcuts(); return;
     case 'openRepos': openRepos(); return;
     case 'repoClose': closeRepos(); return;
@@ -880,12 +1175,11 @@ function handleAction(act) {
     case 'repoRemove': saveRepos((state.repos || []).map(r => r.path).filter(p => p !== arg)); return;
     case 'cardEdit': {
       const cd = state.cardDetail[state.kbId];
-      if (cd && cd.editable === false) { showToast('Hand-authored card — edit its file directly', '#e6ac5c'); return; }
+      if (cd && cd.editable === false) { showToast('Hand-authored card — edit its file directly', COLOR.warning); return; }
       state.kbEditing = true; renderScreen(); return;
     }
     case 'kbSaveEdit': cardEditSave(); return;
     case 'kbCancelEdit': state.kbEditing = false; renderScreen(); return;
-    case 'noop': case 'viewlog': return;
     default: return;
   }
 }
@@ -896,10 +1190,11 @@ async function cardEditSave() {
     id: state.kbId, title: g('kbedit-title'), scope: g('kbedit-scope'),
     key: g('kbedit-key'), keywords: g('kbedit-keywords'),
   });
-  if (res && res.ok === false) { showToast(res.note || 'not saved', '#e6ac5c'); return; }
-  showToast('Saved', '#3ec7bb');
+  if (res && res.ok === false) { showToast(res.note || 'not saved', COLOR.warning); return; }
+  showToast('Saved', COLOR.success);
   state.kbEditing = false;
   state.cards = null;
+  state.analytics = null;
   delete state.cardDetail[state.kbId];
   const d = await loadCard(state.kbId);
   if (d) state.cardDetail[state.kbId] = d;
@@ -920,20 +1215,24 @@ async function reloadSessions() {
 function handleChange(name, value) {
   if (name === 'actRepo') { state.actRepo = value; reloadSessions(); }
   else if (name === 'actHarness') { state.actHarness = value; reloadSessions(); }
+  else if (name === 'analyticsRepo' && state.analyticsRepo !== value) { state.analyticsRepo = value; reloadAnalytics(); }
 }
 
 // refresh re-fetches the live data for the current screen (the dashboard is a
 // snapshot; this pulls the latest without a full page reload).
 async function refresh() {
   state.status = null;
-  if (state.screen === 'overview') state.overview = null;
+  if (state.screen === 'overview') { state.overview = null; state.analytics = null; }
   else if (state.screen === 'review') state.candidates = null;
-  else if (state.screen === 'kb') { state.cards = null; state.cardDetail = {}; }
+  else if (state.screen === 'kb') {
+    if (state.kbMode === 'analytics') state.analytics = null;
+    else { state.cards = null; state.cardDetail = {}; }
+  }
   else if (state.screen === 'activity') { state.sessions = null; state.runs = null; }
   else if (state.screen === 'settings') state.settings = null;
   await ensure(state.screen);
   render();
-  showToast('Refreshed', '#3ec7bb');
+  showToast('Refreshed', COLOR.success);
 }
 
 function toggleShortcuts(force) {
@@ -989,9 +1288,9 @@ async function saveRepos(list) {
   if (Array.isArray(res)) {
     state.repos = res;
     renderReposModal();
-    showToast('Saved to config.yaml', '#3ec7bb');
+    showToast('Saved to config.yaml', COLOR.success);
   } else {
-    showToast((res && res.error) || 'could not save repos', '#e6ac5c');
+    showToast((res && res.error) || 'could not save repos', COLOR.warning);
   }
 }
 function closeRepos() {
@@ -1005,7 +1304,6 @@ function selectCandidate(i) {
   const list = document.querySelector('.queue-list');
   const top = list ? list.scrollTop : 0;
   state.queueIndex = i;
-  state.editing = false;
   render();
   const list2 = document.querySelector('.queue-list');
   if (list2) list2.scrollTop = top;
@@ -1028,6 +1326,7 @@ function doBack() {
 // filters so the target card is never hidden by a stale filter.
 async function gotoCard(short) {
   state.screen = 'kb';
+  state.kbMode = 'cards';
   state.typeFilter = {};
   state.statusFilter = {};
   state.staleFilter = false;
@@ -1058,12 +1357,13 @@ async function saveConfig() {
   inputs.forEach(i => { patch[i.dataset.key] = i.value; });
   const res = await postJSON('/api/config', patch);
   if (res && res.saved === false) {
-    showToast(res.note || 'not saved', '#e6ac5c');
+    showToast(res.note || 'not saved', COLOR.warning);
     return;
   }
   // Server wrote config.yaml and reloaded its snapshot; refresh Settings so the
   // displayed values match what landed on disk.
-  showToast('Saved to config.yaml', '#3ec7bb');
+  showToast('Saved to config.yaml', COLOR.success);
+  state.settingsDraft = null;
   state.settings = null;
   if (state.screen === 'settings') goto('settings');
 }
@@ -1090,18 +1390,23 @@ function onKey(e) {
   if (e.key === '?') { e.preventDefault(); toggleShortcuts(); return; }
   if (e.key === '/' && state.screen === 'kb') { e.preventDefault(); const s = document.getElementById('kb-search'); if (s) s.focus(); return; }
   if (state.screen !== 'review') return;
-  if (state.editing) { if (e.key === 'Escape') cancelEdit(); return; }
   const k = e.key.toLowerCase();
   if (k === 'a') { e.preventDefault(); approve(); }
   else if (k === 'r') { e.preventDefault(); reject(); }
   else if (k === 's') { e.preventDefault(); skip(); }
-  else if (k === 'e') { e.preventDefault(); startEdit(); }
+  else if (k === 'e') { e.preventDefault(); editCandidate(); }
   else if (k === 'j') { e.preventDefault(); moveSel(1); }
   else if (k === 'k') { e.preventDefault(); moveSel(-1); }
 }
 
 // ---------- boot ----------
 function boot() {
+  // Hash deep links are intentionally simple (`/#settings`, `/#activity`):
+  // useful for bookmarks and visual smoke tests without turning this local UI
+  // into a client-side router.
+  const initialScreen = typeof location !== 'undefined' ? location.hash.replace(/^#/, '') : '';
+  if (initialScreen && SCREENS[initialScreen]) state.screen = initialScreen;
+  syncThemeControl();
   document.addEventListener('click', e => {
     const el = e.target.closest('[data-act]');
     // Close the shortcuts popover on any click outside it (and outside its toggle).
@@ -1126,6 +1431,12 @@ function boot() {
   // Physical browser Back button: if we're inside a drill-down, return to where
   // it came from — same path as the in-app "← back" link.
   window.addEventListener('popstate', () => { if (state.returnTo) doBack(); });
+  try {
+    const systemTheme = matchMedia('(prefers-color-scheme: dark)');
+    systemTheme.addEventListener('change', e => {
+      if (!localStorage.getItem(THEME_KEY)) setTheme(e.matches ? 'dark' : 'light', false);
+    });
+  } catch (_) { /* older browsers keep the theme chosen at page load */ }
   goto(state.screen);
 }
 

@@ -12,10 +12,10 @@ const SEED = {
     trend: [30, 40, 36, 52, 46, 60, 55, 68, 64, 78, 74, 88],
     cf: { injected: '24,397', sessions: '59', vsAll: '3.6M' },
     tiles: [
-      { label: 'Cards', value: '140', sub: '84R · 10S · 25P · 14K · 7A', color: '#f2f2f5' },
-      { label: 'To review', value: '4', sub: 'candidates queued', color: '#e6ac5c' },
-      { label: 'Gate-skip rate', value: '62%', sub: 'free prompts', color: '#5fe0d3' },
-      { label: 'Spend today', value: '$0.14', sub: '38 calls', color: '#f2f2f5' },
+      { label: 'Cards', value: '140', sub: '84R · 10S · 25P · 14K · 7A', color: 'var(--metric-default)' },
+      { label: 'To review', value: '4', sub: 'candidates queued', color: 'var(--metric-review)' },
+      { label: 'Gate-skip rate', value: '62%', sub: 'free prompts', color: 'var(--metric-success)' },
+      { label: 'Spend today', value: '$0.14', sub: '38 calls', color: 'var(--metric-default)' },
     ],
     granularity: { body: 12, summary: 46, hook: 42 },
     failedJobs: [{ kind: 'learn run', at: '2026-07-20 08:12', reason: 'ollama embed timeout · fell back to keyword' }],
@@ -29,6 +29,28 @@ const SEED = {
       { name: 'import/legacy-makefile', last: '41d' },
       { name: 'pattern/old-ci', last: '38d' },
       { name: 'rule/py2-compat', last: '52d' },
+    ],
+  },
+  analytics: {
+    available: true,
+    range: 'Last 7 days',
+    summary: { activeCards: 5, sessions: 3, deliveries: 13, tokens: 2692, crossHarnessCards: 2 },
+    repos: [
+      { key: '/demo/cutpilot', label: 'cutpilot', path: '/demo/cutpilot' },
+      { key: '/demo/phin', label: 'phin', path: '/demo/phin' },
+    ],
+    harnesses: [{ code: 'claude', label: 'Claude Code' }, { code: 'codex', label: 'Codex CLI' }],
+    cards: [
+      { id: 'rules/go-error-wrapping', short: 'a3f1', title: 'Wrap errors with %w, never %v', type: 'rule', available: true, sessions: 3, deliveries: 4, tokens: 460, lastUsed: 'today 10:53', repos: ['phin', 'cutpilot'], harnesses: [
+        { code: 'claude', label: 'Claude Code', sessions: 2, deliveries: 3, tokens: 340 }, { code: 'codex', label: 'Codex CLI', sessions: 1, deliveries: 1, tokens: 120 }] },
+      { id: 'skills/git-worktree', short: 'b710', title: 'Set up a git worktree for parallel work', type: 'skill', available: true, sessions: 2, deliveries: 3, tokens: 820, lastUsed: 'today 09:22', repos: ['phin'], harnesses: [
+        { code: 'claude', label: 'Claude Code', sessions: 1, deliveries: 2, tokens: 610 }, { code: 'codex', label: 'Codex CLI', sessions: 1, deliveries: 1, tokens: 210 }] },
+      { id: 'styles/commit-subject', short: 'c8b2', title: 'Commit subjects: imperative, ≤50 chars', type: 'style', available: true, sessions: 2, deliveries: 2, tokens: 288, lastUsed: 'yesterday 16:41', repos: ['phin'], harnesses: [
+        { code: 'claude', label: 'Claude Code', sessions: 2, deliveries: 2, tokens: 288 }] },
+      { id: 'patterns/debounce-cursor', short: 'd4e9', title: 'Debounce cursor events at 16ms', type: 'pattern', available: true, sessions: 1, deliveries: 2, tokens: 404, lastUsed: 'today 09:22', repos: ['cutpilot'], harnesses: [
+        { code: 'codex', label: 'Codex CLI', sessions: 1, deliveries: 2, tokens: 404 }] },
+      { id: 'rules/removed-card', short: '', title: 'rules/removed-card', type: 'unknown', available: false, sessions: 1, deliveries: 2, tokens: 720, lastUsed: 'yesterday 16:30', repos: ['phin'], harnesses: [
+        { code: 'claude', label: 'Claude Code', sessions: 1, deliveries: 2, tokens: 720 }] },
     ],
   },
   candidates: [
@@ -60,34 +82,34 @@ const SEED = {
   ],
   cards: (function () {
     const u = (a, b, c, d) => [
-      { label: 'injected', value: a, color: '#47d1c4' }, { label: 'expanded', value: b, color: '#e4e4e8' },
-      { label: 'referenced', value: c, color: '#e4e4e8' }, { label: 'downvoted', value: d, color: '#ff8079' }];
+      { label: 'injected', value: a, color: 'var(--metric-success)' }, { label: 'expanded', value: b, color: 'var(--metric-blue)' },
+      { label: 'referenced', value: c, color: 'var(--metric-violet)' }, { label: 'downvoted', value: d, color: 'var(--metric-danger)' }];
     const sp = () => [55, 70, 40, 85, 60, 75, 50];
     return [
       { id: 'a3f1', type: 'rule', title: 'Wrap errors with %w, never %v', status: 'confirmed', scopeLabels: ['lang:go'], baseline: true, injected: 214, key: 'go/errors', source: 'import', mergedFrom: 'phin, cutpilot', model: 'claude-sonnet', hash: '9f3c…a1', spark: sp(), triggers: ['error', 'wrap', 'errors.Is', 'fmt.Errorf', 'lỗi'], usage: u('214', '61', '18', '0'),
         body: '<p>Always wrap propagated errors with <code>fmt.Errorf("…: %w", err)</code> so callers can <code>errors.Is</code>/<code>errors.As</code> the chain. Reserve <code>%v</code> for terminal logging only.</p><h4>Why</h4><p>Losing the wrapped error breaks sentinel checks downstream and makes root-cause analysis guesswork.</p>',
-        history: [{ action: 'learn:', detail: 'reinforced from phin session', date: '2026-07-19', sha: 'a1b2c3d', dot: '#3ec7bb' }, { action: 'merge:', detail: 'merged duplicate from cutpilot', date: '2026-06-30', sha: '7788aa1', dot: '#6db4ff' }, { action: 'import:', detail: 'created from CLAUDE.md', date: '2026-05-02', sha: '0011ff9', dot: '#8a8a93' }] },
+        history: [{ action: 'learn:', detail: 'reinforced from phin session', date: '2026-07-19', sha: 'a1b2c3d', dot: '#169b6b' }, { action: 'merge:', detail: 'merged duplicate from cutpilot', date: '2026-06-30', sha: '7788aa1', dot: '#3973db' }, { action: 'import:', detail: 'created from CLAUDE.md', date: '2026-05-02', sha: '0011ff9', dot: '#7c8799' }] },
       { id: 'c8b2', type: 'style', title: 'Commit subjects: imperative, ≤50 chars', status: 'confirmed', scopeLabels: ['global'], baseline: true, injected: 188, key: 'git/commit', source: 'manual', mergedFrom: '—', model: '—', hash: '2c4d…9b', spark: sp(), triggers: ['commit', 'message', 'git'], usage: u('188', '40', '12', '2'),
         body: '<p>Write commit subjects in the imperative mood ("Add", not "Added"), keep them under 50 characters, and put detail in the body separated by a blank line.</p>',
-        history: [{ action: 'manual:', detail: 'edited scope to global', date: '2026-07-01', sha: 'ee44bb2', dot: '#e6ac5c' }, { action: 'import:', detail: 'created manually', date: '2026-04-11', sha: '33aa11c', dot: '#8a8a93' }] },
+        history: [{ action: 'manual:', detail: 'edited scope to global', date: '2026-07-01', sha: 'ee44bb2', dot: '#c97a16' }, { action: 'import:', detail: 'created manually', date: '2026-04-11', sha: '33aa11c', dot: '#7c8799' }] },
       { id: 'd4e9', type: 'pattern', title: 'Debounce cursor events at 16ms', status: 'candidate', scopeLabels: ['repo:cutpilot'], baseline: false, injected: 3, key: '', source: 'learn', mergedFrom: '—', model: 'claude-haiku', hash: 'aa90…c2', spark: sp(), triggers: ['debounce', 'cursor', 'raf'], usage: u('3', '1', '0', '0'),
         body: '<p>Coalesce <code>cursormove</code> to a single rAF (~16ms) before touching the overlay.</p>',
-        history: [{ action: 'learn:', detail: 'candidate created', date: '2026-07-20', sha: 'ff0099a', dot: '#e6ac5c' }] },
+        history: [{ action: 'learn:', detail: 'candidate created', date: '2026-07-20', sha: 'ff0099a', dot: '#c97a16' }] },
       { id: 'b710', type: 'skill', title: 'Set up a git worktree for parallel work', status: 'confirmed', scopeLabels: ['global'], baseline: false, injected: 96, key: 'git/worktree', source: 'gen', mergedFrom: '—', model: 'claude-sonnet', hash: '55ab…7d', spark: sp(), triggers: ['worktree', 'branch', 'parallel'], usage: u('96', '9', '3', '4'),
         body: '<p>Use <code>git worktree add ../feature feature</code> to check out a second branch without stashing. Remove with <code>git worktree remove</code>.</p>',
-        history: [{ action: 'gen:', detail: 'generated from docs', date: '2026-06-18', sha: '9a8b7c6', dot: '#57c785' }] },
+        history: [{ action: 'gen:', detail: 'generated from docs', date: '2026-06-18', sha: '9a8b7c6', dot: '#169b6b' }] },
       { id: '6f2c', type: 'agent', title: 'Reviewer agent: security-focused pass', status: 'confirmed', scopeLabels: ['repo:phin'], baseline: false, injected: 41, key: 'agent/review', source: 'mcp', mergedFrom: '—', model: 'claude-sonnet', hash: 'cd12…4e', spark: sp(), triggers: ['review', 'security', 'audit'], usage: u('41', '20', '11', '1'),
         body: '<p>Sub-agent prompt that reviews a diff for injection, authz, and secret-handling issues before merge.</p>',
-        history: [{ action: 'mcp:', detail: 'synced from registry', date: '2026-07-10', sha: '4e5f6a7', dot: '#ff7ea8' }] },
+        history: [{ action: 'mcp:', detail: 'synced from registry', date: '2026-07-10', sha: '4e5f6a7', dot: '#d65383' }] },
       { id: '9d01', type: 'lesson', title: 'py2-compat shims no longer needed', status: 'retired', scopeLabels: ['lang:python'], baseline: false, injected: 0, key: '', source: 'import', mergedFrom: '—', model: '—', hash: '77ce…10', spark: [10, 8, 6, 4, 2, 0, 0], triggers: ['python2', 'compat', '__future__'], usage: u('0', '0', '0', '6'),
         body: '<p><em>Retired.</em> The codebase dropped Python 2 support; <code>__future__</code> imports and six shims are obsolete.</p>',
-        history: [{ action: 'retire:', detail: 'never pulled in 52d', date: '2026-07-15', sha: 'dd00aa1', dot: '#e6ac5c' }, { action: 'import:', detail: 'created from legacy docs', date: '2025-11-20', sha: '1122ff0', dot: '#8a8a93' }] },
+        history: [{ action: 'retire:', detail: 'never pulled in 52d', date: '2026-07-15', sha: 'dd00aa1', dot: '#c97a16' }, { action: 'import:', detail: 'created from legacy docs', date: '2025-11-20', sha: '1122ff0', dot: '#7c8799' }] },
       { id: '3a55', type: 'rule', title: 'Never log secrets, even at debug level', status: 'confirmed', scopeLabels: ['global'], baseline: true, injected: 176, key: 'sec/logging', source: 'manual', mergedFrom: '—', model: '—', hash: '88fa…22', spark: sp(), triggers: ['log', 'secret', 'token', 'redact'], usage: u('176', '33', '9', '0'),
         body: '<p>Redact tokens, keys, and PII before logging at any level. Prefer structured logging with an explicit allowlist of fields.</p>',
-        history: [{ action: 'manual:', detail: 'created manually', date: '2026-03-02', sha: '99cc22a', dot: '#8a8a93' }] },
+        history: [{ action: 'manual:', detail: 'created manually', date: '2026-03-02', sha: '99cc22a', dot: '#7c8799' }] },
       { id: '1e88', type: 'style', title: 'Prefer early returns over nested ifs', status: 'confirmed', scopeLabels: ['lang:go', 'lang:ts'], baseline: false, injected: 122, key: '', source: 'gen', mergedFrom: '—', model: 'claude-sonnet', hash: '0a0a…33', spark: sp(), triggers: ['guard', 'early return', 'nesting'], usage: u('122', '14', '5', '1'),
         body: '<p>Handle error/edge cases first and return early to keep the happy path flat and unindented.</p>',
-        history: [{ action: 'gen:', detail: 'generated', date: '2026-05-28', sha: '5b5b5b5', dot: '#57c785' }] },
+        history: [{ action: 'gen:', detail: 'generated', date: '2026-05-28', sha: '5b5b5b5', dot: '#169b6b' }] },
     ];
   })(),
   sessions: [
@@ -116,25 +138,39 @@ const SEED = {
         { id: 'agents/reviewer', short: '77ac', gran: 'body', tok: 388 }] }] },
   ],
   runs: [
-    { date: '2026-07-20 08:12', mined: '31', clean: '27', candidates: '4', patterns: '6', spend: '$0.09', dot: '#ff5b52', failed: true },
-    { date: '2026-07-13 08:10', mined: '44', clean: '39', candidates: '7', patterns: '9', spend: '$0.12', dot: '#57c785', failed: false },
-    { date: '2026-07-06 08:11', mined: '28', clean: '25', candidates: '3', patterns: '5', spend: '$0.07', dot: '#57c785', failed: false },
+    { date: '2026-07-20 08:12', mined: '31', clean: '27', candidates: '4', patterns: '6', spend: '$0.09', dot: '#dc4c4c', failed: true },
+    { date: '2026-07-13 08:10', mined: '44', clean: '39', candidates: '7', patterns: '9', spend: '$0.12', dot: '#169b6b', failed: false },
+    { date: '2026-07-06 08:11', mined: '28', clean: '25', candidates: '3', patterns: '5', spend: '$0.07', dot: '#169b6b', failed: false },
   ],
   settings: {
     spendToday: 0.14, spendCap: 1.0,
+    learning: {
+      provider: 'auto', cheapModel: 'claude-haiku-4-5', strongModel: 'claude-sonnet-5',
+      oauthTokenFile: '', anthropicApiKeyFile: '', openaiApiKeyFile: '',
+      backends: [
+        { code: 'auto', label: 'Auto', mark: 'AU', description: 'Use the first ready backend, preserving your existing setup.', auth: 'Detected automatically', billing: 'Depends on backend', status: 'Chooses the first ready backend', tone: 'auto', available: true, cheapModel: 'claude-haiku-4-5', strongModel: 'claude-sonnet-5' },
+        { code: 'codex-cli', label: 'Codex terminal', mark: 'CX', description: 'Mine lessons with your existing Codex sign-in—no API key required.', auth: 'Codex / ChatGPT login', billing: 'Account quota', status: 'Signed in and ready', tone: 'ready', available: true, cheapModel: 'gpt-5.6-terra', strongModel: 'gpt-5.6-sol' },
+        { code: 'openai', label: 'OpenAI API', mark: 'OA', description: 'Use metered OpenAI API models with structured outputs and spend caps.', auth: 'OPENAI_API_KEY', billing: 'Metered API', status: 'Key not configured', tone: 'setup', available: false, cheapModel: 'gpt-5.6-luna', strongModel: 'gpt-5.6-terra' },
+        { code: 'claude-cli', label: 'Claude terminal', mark: 'CL', description: 'Mine through the Claude Code terminal and its existing subscription login.', auth: 'Claude Code login or token file', billing: 'Subscription', status: 'Signed in and ready', tone: 'ready', available: true, cheapModel: 'claude-haiku-4-5', strongModel: 'claude-sonnet-5' },
+        { code: 'anthropic', label: 'Anthropic API', mark: 'AN', description: 'Use the metered Anthropic API with the same daily spend guard.', auth: 'ANTHROPIC_API_KEY', billing: 'Metered API', status: 'Key not configured', tone: 'setup', available: false, cheapModel: 'claude-haiku-4-5', strongModel: 'claude-sonnet-5' },
+        { code: 'ollama', label: 'Ollama', mark: 'OL', description: 'Keep learning fully local with models served by Ollama.', auth: 'Local endpoint', billing: 'Local', status: 'Ollama is running', tone: 'ready', available: true, cheapModel: 'qwen3', strongModel: 'qwen3' },
+        { code: 'none', label: 'Off', mark: '—', description: 'Keep retrieval active but stop model-powered transcript mining.', auth: 'None', billing: 'No model calls', status: 'Learning disabled', tone: 'off', available: true, cheapModel: 'claude-haiku-4-5', strongModel: 'claude-sonnet-5' },
+      ],
+    },
     groups: [
       { title: 'Budgets', items: [
-        { key: 'push_budget_tokens', desc: 'max tokens injected per prompt', value: '1500', width: '90px' },
-        { key: 'baseline_budget_tokens', desc: 'session-start baseline cap', value: '700', width: '90px' }] },
+        { key: 'push_budget', desc: 'max tokens injected per prompt', value: '700', width: '90px' },
+        { key: 'baseline_budget', desc: 'session-start baseline cap', value: '1200', width: '90px' }] },
       { title: 'Lifecycle', items: [
-        { key: 'candidate_ttl_days', desc: 'auto-expire unreviewed candidates', value: '14', width: '70px' },
-        { key: 'stale_after_days', desc: 'flag cards never pulled', value: '30', width: '70px' }] },
+        { key: 'candidate_ttl_days', desc: 'auto-expire unreviewed candidates', value: '30', width: '70px' },
+        { key: 'confirm_at', desc: 'observations needed to auto-confirm', value: '2', width: '70px' }] },
       { title: 'Caps & spend', items: [
-        { key: 'daily_cap_usd', desc: 'hard stop on learn spend', value: '1.00', width: '80px' },
-        { key: 'max_calls_per_run', desc: 'model calls per learn run', value: '60', width: '70px' }] },
+        { key: 'daily_usd_cap', desc: 'hard stop on learn spend', value: '0.50', width: '80px' },
+        { key: 'daily_call_cap', desc: 'model calls per day', value: '40', width: '70px' },
+        { key: 'max_jobs_per_run', desc: 'transcripts mined per run', value: '50', width: '70px' }] },
       { title: 'Gate', items: [
-        { key: 'extra_acks', desc: 'always-fire keywords', value: 'deploy, ship', width: '160px' },
-        { key: 'stopwords', desc: 'never trigger on these', value: 'the, a, is', width: '160px' },
+        { key: 'extra_acks', desc: 'always-skip acknowledgements', value: '', width: '160px' },
+        { key: 'extra_stopwords', desc: 'never trigger on these', value: '', width: '160px' },
         { key: 'repos', desc: 'watched repositories', value: 'phin, cutpilot', width: '160px' }] },
     ],
   },

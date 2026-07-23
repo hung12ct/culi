@@ -63,7 +63,7 @@ func splitCommitSubject(subject string) (action, detail string) {
 func actionDot(action string) string {
 	switch action {
 	case "learn:":
-		return "#3ec7bb"
+		return "#169b6b"
 	case "merge:":
 		return "#6db4ff"
 	case "gen:":
@@ -71,8 +71,8 @@ func actionDot(action string) string {
 	case "mcp:":
 		return "#ff7ea8"
 	case "retire:", "review:", "manual:":
-		return "#e6ac5c"
+		return "#c97a16"
 	default:
-		return "#8a8a93"
+		return "#7c8799"
 	}
 }

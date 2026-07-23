@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
@@ -206,9 +210,34 @@ type setGroup struct {
 	Items []setItem `json:"items"`
 }
 type settingsPayload struct {
-	SpendToday float64    `json:"spendToday"`
-	SpendCap   float64    `json:"spendCap"`
-	Groups     []setGroup `json:"groups"`
+	SpendToday float64          `json:"spendToday"`
+	SpendCap   float64          `json:"spendCap"`
+	Learning   learningSettings `json:"learning"`
+	Groups     []setGroup       `json:"groups"`
+}
+
+type learningSettings struct {
+	Provider            string                `json:"provider"`
+	CheapModel          string                `json:"cheapModel"`
+	StrongModel         string                `json:"strongModel"`
+	OAuthTokenFile      string                `json:"oauthTokenFile"`
+	AnthropicAPIKeyFile string                `json:"anthropicApiKeyFile"`
+	OpenAIAPIKeyFile    string                `json:"openaiApiKeyFile"`
+	Backends            []learningBackendView `json:"backends"`
+}
+
+type learningBackendView struct {
+	Code        string `json:"code"`
+	Label       string `json:"label"`
+	Mark        string `json:"mark"`
+	Description string `json:"description"`
+	Auth        string `json:"auth"`
+	Billing     string `json:"billing"`
+	Status      string `json:"status"`
+	Tone        string `json:"tone"`
+	Available   bool   `json:"available"`
+	CheapModel  string `json:"cheapModel"`
+	StrongModel string `json:"strongModel"`
 }
 
 // statsView is the subset of the `culi stats` JSON report the console consumes.
@@ -312,10 +341,10 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 	trend := normalizeTrend(mustDaily(s.store.DailyTokens(ctx, 12)))
 
 	tiles := []tile{
-		{Label: "Cards", Value: itoa(len(metas)), Sub: typeLettersSub(sv.Cards.ByType), Color: "#f2f2f5"},
-		{Label: "To review", Value: itoa(sv.Cards.Candidates), Sub: "candidates queued", Color: "#e6ac5c"},
-		{Label: "Gate skips", Value: itoa(sv.Retrieval.GateSkipTotal), Sub: "last 7d", Color: "#5fe0d3"},
-		{Label: "Spend today", Value: fmtUSD(sv.Learning.SpendToday.USD), Sub: itoa(sv.Learning.SpendToday.Calls) + " calls", Color: "#f2f2f5"},
+		{Label: "Cards", Value: itoa(len(metas)), Sub: typeLettersSub(sv.Cards.ByType), Color: "var(--metric-default)"},
+		{Label: "To review", Value: itoa(sv.Cards.Candidates), Sub: "candidates queued", Color: "var(--metric-review)"},
+		{Label: "Gate skips", Value: itoa(sv.Retrieval.GateSkipTotal), Sub: "last 7d", Color: "var(--metric-success)"},
+		{Label: "Spend today", Value: fmtUSD(sv.Learning.SpendToday.USD), Sub: itoa(sv.Learning.SpendToday.Calls) + " calls", Color: "var(--metric-default)"},
 	}
 
 	var failed []failedJob
@@ -465,10 +494,10 @@ func (s *server) buildCardDetail(ctx context.Context, id string) (cardDetailPayl
 		Model:       model,
 		Hash:        hash,
 		Usage: []usageTile{
-			{Label: "injected", Value: itoa(round(cs.Injected)), Color: "#47d1c4"},
-			{Label: "expanded", Value: itoa(round(cs.Expanded)), Color: "#e4e4e8"},
-			{Label: "referenced", Value: itoa(round(cs.Referenced)), Color: "#e4e4e8"},
-			{Label: "downvoted", Value: itoa(round(cs.Downvoted)), Color: "#ff8079"},
+			{Label: "injected", Value: itoa(round(cs.Injected)), Color: "var(--metric-success)"},
+			{Label: "expanded", Value: itoa(round(cs.Expanded)), Color: "var(--metric-blue)"},
+			{Label: "referenced", Value: itoa(round(cs.Referenced)), Color: "var(--metric-violet)"},
+			{Label: "downvoted", Value: itoa(round(cs.Downvoted)), Color: "var(--metric-danger)"},
 		},
 		Triggers: triggers,
 		Keywords: card.Triggers.Keywords,
@@ -636,10 +665,11 @@ func (s *server) buildRuns() []runPayload {
 	return out
 }
 
-func (s *server) buildSettings() settingsPayload {
+func (s *server) buildSettings(ctx context.Context) settingsPayload {
 	c := s.config()
 	led := llmtier.LoadLedger(config.StateDir(s.base))
 	today := time.Now().UTC().Format("2006-01-02")
+	learning := s.buildLearningSettings(ctx, c)
 	groups := []setGroup{
 		{Title: "Budgets", Items: []setItem{
 			{Key: "push_budget", Desc: "max tokens injected per prompt", Value: itoa(c.PushBudget), Width: "90px"},
@@ -654,20 +684,137 @@ func (s *server) buildSettings() settingsPayload {
 			{Key: "daily_call_cap", Desc: "model calls per day", Value: itoa(c.Learn.DailyCallCap), Width: "70px"},
 			{Key: "max_jobs_per_run", Desc: "transcripts mined per run, newest first (−1 = no limit)", Value: itoa(c.Learn.MaxJobsPerRun), Width: "70px"},
 		}},
-		{Title: "Learning backend", Items: []setItem{
-			{Key: "provider", Desc: "auto · anthropic · claude-cli · ollama · none", Value: c.Learn.Provider, Width: "120px"},
-			{Key: "cheap_model", Desc: "routine mining model (e.g. qwen3 for ollama)", Value: c.Learn.CheapModel, Width: "180px"},
-			{Key: "strong_model", Desc: "escalation model on schema failure", Value: c.Learn.StrongModel, Width: "180px"},
-			{Key: "oauth_token_file", Desc: "file with CLAUDE_CODE_OAUTH_TOKEN (headless subscription auth)", Value: c.Learn.OAuthTokenFile, Width: "260px"},
-			{Key: "anthropic_api_key_file", Desc: "file with ANTHROPIC_API_KEY (headless metered API)", Value: c.Learn.AnthropicAPIKeyFile, Width: "260px"},
-		}},
 		{Title: "Gate", Items: []setItem{
 			{Key: "extra_acks", Desc: "always-skip acknowledgements", Value: strings.Join(c.ExtraAcks, ", "), Width: "160px"},
 			{Key: "extra_stopwords", Desc: "never trigger on these", Value: strings.Join(c.ExtraStopwords, ", "), Width: "160px"},
 			{Key: "repos", Desc: "watched repositories", Value: repoBasenames(c.Repos), Width: "160px"},
 		}},
 	}
-	return settingsPayload{SpendToday: led.Days[today].USD, SpendCap: c.Learn.DailyUSDCap, Groups: groups}
+	return settingsPayload{
+		SpendToday: led.Days[today].USD,
+		SpendCap:   c.Learn.DailyUSDCap,
+		Learning:   learning,
+		Groups:     groups,
+	}
+}
+
+func (s *server) buildLearningSettings(ctx context.Context, c config.Config) learningSettings {
+	lc := c.Learn
+	provider := lc.Provider
+	if provider == "" {
+		provider = "auto"
+	}
+	openAIReady, openAIStatus := credentialStatus("OPENAI_API_KEY", lc.OpenAIAPIKeyFile)
+	anthropicReady, anthropicStatus := credentialStatus("ANTHROPIC_API_KEY", lc.AnthropicAPIKeyFile)
+	var claudeReady, codexReady, ollamaReady bool
+	var claudeStatus, codexStatus, ollamaStatus string
+	var probes sync.WaitGroup
+	probes.Add(3)
+	go func() {
+		defer probes.Done()
+		claudeReady, claudeStatus = cliStatus(ctx, "claude", "auth", "status")
+	}()
+	go func() {
+		defer probes.Done()
+		codexReady, codexStatus = cliStatus(ctx, "codex", "login", "status")
+	}()
+	go func() {
+		defer probes.Done()
+		ollamaReady, ollamaStatus = s.ollamaBackendStatus(ctx, c.Ollama.Endpoint)
+	}()
+	probes.Wait()
+	backend := func(code, label, mark, description, auth, billing, status, tone string, available bool) learningBackendView {
+		cheap, strong := config.RecommendedLearnModels(code)
+		return learningBackendView{
+			Code: code, Label: label, Mark: mark, Description: description,
+			Auth: auth, Billing: billing, Status: status, Tone: tone, Available: available,
+			CheapModel: cheap, StrongModel: strong,
+		}
+	}
+	tone := func(ready bool) string {
+		if ready {
+			return "ready"
+		}
+		return "setup"
+	}
+	backends := []learningBackendView{
+		backend("auto", "Auto", "AU", "Use the first ready backend, preserving your existing setup.", "Detected automatically", "Depends on backend", "Chooses the first ready backend", "auto", true),
+		backend("codex-cli", "Codex terminal", "CX", "Mine lessons with your existing Codex sign-in—no API key required.", "Codex / ChatGPT login", "Account quota", codexStatus, tone(codexReady), codexReady),
+		backend("openai", "OpenAI API", "OA", "Use metered OpenAI API models with structured outputs and spend caps.", "OPENAI_API_KEY", "Metered API", openAIStatus, tone(openAIReady), openAIReady),
+		backend("claude-cli", "Claude terminal", "CL", "Mine through the Claude Code terminal and its existing subscription login.", "Claude Code login or token file", "Subscription", claudeStatus, tone(claudeReady), claudeReady),
+		backend("anthropic", "Anthropic API", "AN", "Use the metered Anthropic API with the same daily spend guard.", "ANTHROPIC_API_KEY", "Metered API", anthropicStatus, tone(anthropicReady), anthropicReady),
+		backend("ollama", "Ollama", "OL", "Keep learning fully local with models served by Ollama.", "Local endpoint", "Local", ollamaStatus, tone(ollamaReady), ollamaReady),
+		backend("none", "Off", "—", "Keep retrieval active but stop model-powered transcript mining.", "None", "No model calls", "Learning disabled", "off", true),
+	}
+	return learningSettings{
+		Provider: provider, CheapModel: lc.CheapModel, StrongModel: lc.StrongModel,
+		OAuthTokenFile: lc.OAuthTokenFile, AnthropicAPIKeyFile: lc.AnthropicAPIKeyFile,
+		OpenAIAPIKeyFile: lc.OpenAIAPIKeyFile, Backends: backends,
+	}
+}
+
+func credentialStatus(envName, path string) (bool, string) {
+	if os.Getenv(envName) != "" {
+		return true, envName + " is set"
+	}
+	if path == "" {
+		return false, "Key not configured"
+	}
+	expanded := path
+	if path == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			expanded = home
+		}
+	} else if strings.HasPrefix(path, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			expanded = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	info, err := os.Stat(expanded)
+	if err == nil && !info.IsDir() && info.Size() > 0 {
+		return true, "Key file ready"
+	}
+	return false, "Key file not found"
+}
+
+func cliStatus(ctx context.Context, binary string, args ...string) (bool, string) {
+	path, err := exec.LookPath(binary)
+	if err != nil {
+		return false, "Terminal not installed"
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(probeCtx, path, args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if cmd.Run() == nil {
+		return true, "Signed in and ready"
+	}
+	if probeCtx.Err() != nil {
+		return false, "Sign-in check timed out"
+	}
+	return false, "Login required"
+}
+
+func (s *server) ollamaBackendStatus(ctx context.Context, endpoint string) (bool, string) {
+	if s.store != nil && s.ollamaOffline(ctx) {
+		return false, "Temporarily offline"
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeCtx, http.MethodGet, strings.TrimRight(endpoint, "/")+"/api/tags", nil)
+	if err != nil {
+		return false, "Endpoint is invalid"
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, "Endpoint not reachable"
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return false, "Endpoint returned " + resp.Status
+	}
+	return true, "Ollama is running"
 }
 
 // ---------- helpers ----------

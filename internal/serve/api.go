@@ -70,6 +70,24 @@ func (s *server) handleOverview(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, s.buildOverview(r.Context()))
 }
 
+func (s *server) handleAnalytics(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	payload, err := s.buildAnalytics(r.Context(), analyticsFilter{
+		Harness: harnessFilter(q.Get("harness")),
+		Repo:    q.Get("repo"),
+	})
+	if err != nil {
+		log.Printf("serve: analytics unavailable: %v", err)
+		s.writeJSON(w, http.StatusServiceUnavailable, analyticsPayload{
+			Available: false,
+			Reason:    "Activity data is temporarily unavailable",
+			Range:     "Last 7 days",
+		})
+		return
+	}
+	s.writeJSON(w, http.StatusOK, payload)
+}
+
 func (s *server) handleCandidates(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, s.buildCandidates(r.Context()))
 }
@@ -125,7 +143,7 @@ func (s *server) handleRuns(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleConfigGet(w http.ResponseWriter, r *http.Request) {
-	s.writeJSON(w, http.StatusOK, s.buildSettings())
+	s.writeJSON(w, http.StatusOK, s.buildSettings(r.Context()))
 }
 
 // handleApprove confirms a candidate (candidate→confirmed, retiring any
@@ -353,20 +371,6 @@ func (s *server) handleCardEdit(w http.ResponseWriter, r *http.Request) {
 		log.Printf("serve: commit after edit %s: %v", sc.ID, err)
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-// handleEdit acknowledges the inline quick-fix. The console applies the edit
-// optimistically client-side; a server-side card writer (full editor) is not
-// wired in this build, so this endpoint is intentionally a no-op that reports
-// so honestly rather than silently dropping the edit.
-func (s *server) handleEdit(w http.ResponseWriter, r *http.Request) {
-	if !s.guardLocal(w, r) {
-		return
-	}
-	s.writeJSON(w, http.StatusOK, map[string]any{
-		"ok":   true,
-		"note": "quick-fix applied in the console only; the full card editor is not yet wired",
-	})
 }
 
 // repoInfo describes one watched repo for the manager popup.

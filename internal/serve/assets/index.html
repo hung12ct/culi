@@ -3,7 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>culi · Review Console</title>
+  <title>culi · Context Control</title>
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem('culi-theme');
+        const dark = saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      } catch (_) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
   <link rel="icon" href="favicon.ico" sizes="any" />
   <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png" />
@@ -15,9 +26,9 @@
 
     <!-- STATUS STRIP -->
     <div class="strip" id="strip">
-      <div class="strip-serve mono">
+      <div class="strip-serve">
         <span class="dot dot-serve" id="serve-dot"></span>
-        <span class="strip-serve-name">culi</span> serve
+        <span class="strip-serve-name">culi</span> local
       </div>
       <span class="strip-sep">·</span>
       <span><b id="s-cards">—</b> cards</span>
@@ -29,7 +40,7 @@
       <span title="queued transcripts waiting to be mined"><b id="s-learn">—</b> to learn</span>
       <button class="strip-failed" id="s-failed" hidden><span>⚠</span> <span id="s-failed-label"></span></button>
       <div class="spacer"></div>
-      <span class="mono faint strip-addr" id="s-addr">localhost:7378</span>
+      <span class="faint strip-privacy">Private on this device</span>
     </div>
 
     <div class="body">
@@ -40,7 +51,7 @@
           <img class="brand-logo" src="logo.png" alt="culi" />
           <div>
             <div class="brand-title">culi</div>
-            <div class="brand-sub mono">review console</div>
+            <div class="brand-sub">context control</div>
           </div>
         </div>
         <div class="nav-items" id="nav-items"></div>
@@ -60,8 +71,12 @@
           <span class="header-sub" id="screen-sub"></span>
           <div class="spacer"></div>
           <div class="header-actions">
-            <button class="hbtn" data-act="refresh" title="Refresh data" aria-label="Refresh">↻</button>
-            <button class="hbtn" data-act="shortcuts" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button>
+            <button class="hbtn theme-toggle" id="theme-toggle" data-act="toggleTheme" title="Use dark mode" aria-label="Use dark mode">
+              <svg class="theme-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5 8.5 8.5 0 1 0 20.5 14.2Z"/></svg>
+              <svg class="theme-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>
+            </button>
+            <button class="hbtn" data-act="refresh" title="Refresh data" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.34 5.66"/><path d="M20 4v7h-7"/></svg></button>
+            <button class="hbtn" data-act="shortcuts" title="Keyboard shortcuts" aria-label="Keyboard shortcuts"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.3 2.3 0 1 1 3.3 2.08c-.75.38-1.1.9-1.1 1.92"/><path d="M12 17h.01"/></svg></button>
           </div>
         </header>
         <div class="screen" id="screen"></div>
@@ -76,7 +91,7 @@
       <div class="shortcuts-title">Keyboard shortcuts</div>
       <div class="shortcuts-group">Review queue</div>
       <div class="shortcuts-row"><span><b class="mono">a</b> approve</span><span><b class="mono">r</b> reject</span></div>
-      <div class="shortcuts-row"><span><b class="mono">s</b> skip</span><span><b class="mono">e</b> edit</span></div>
+      <div class="shortcuts-row"><span><b class="mono">s</b> skip</span><span><b class="mono">e</b> open editor</span></div>
       <div class="shortcuts-row"><span><b class="mono">j</b> / <b class="mono">k</b> move</span><span><b class="mono">⌘Z</b> undo</span></div>
       <div class="shortcuts-group">Anywhere</div>
       <div class="shortcuts-row"><span><b class="mono">?</b> this panel</span><span><b class="mono">Esc</b> close</span></div>
