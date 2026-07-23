@@ -91,8 +91,8 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 		}
 	}
 
-	// Skip every event inside culi's own headless `claude -p` learning calls
-	// (llmgen sets this env). Injecting context would contaminate the mining
+	// Skip every event inside culi's own terminal-model learning calls (llmgen
+	// sets this env for Claude and Codex). Injecting context would contaminate the mining
 	// prompt; enqueuing the call's transcript would make learning mine its own
 	// calls (self-ingestion loop). Expected, not an error: silent empty output.
 	if os.Getenv(config.InternalEnv) != "" {

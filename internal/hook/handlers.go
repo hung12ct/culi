@@ -214,6 +214,16 @@ func handleSessionEnd(ctx context.Context, base string, in Input) error {
 func enqueueTranscript(base string, in Input, trigger string) error {
 	if in.TranscriptPath == "" {
 		lifecycleLog(base, in, trigger, "skip=no-transcript")
+		// Codex versions differ in whether lifecycle hooks include
+		// transcript_path. A detached, throttled, read-only state scan recovers
+		// the rollout without putting database work on the hook path. Stop fires
+		// frequently, so on transcript-less Codex every Stop forks a worker — but
+		// the worker no-ops within milliseconds via the 10-minute scan throttle
+		// (autoCodexScanInterval), so the recurring cost is one cheap fork, not a
+		// scan per turn.
+		if in.Harness == harness.Codex {
+			spawnLearnWorker(base, true, trigger == "session-end")
+		}
 		return nil
 	}
 	job := queue.Job{
@@ -224,7 +234,7 @@ func enqueueTranscript(base string, in Input, trigger string) error {
 		return fmt.Errorf("hook: enqueueing transcript: %w", err)
 	}
 	lifecycleLog(base, in, trigger, "queued")
-	spawnLearnWorker(base)
+	spawnLearnWorker(base, in.Harness == harness.Codex, in.Harness == harness.Codex && trigger == "session-end")
 	return nil
 }
 
@@ -256,7 +266,7 @@ func eventSource(source string) string {
 // next session end. CULI_NO_LEARN_SPAWN disables the spawn entirely: users
 // who prefer manual `culi learn`, and tests, where os.Executable is the test
 // binary and re-executing it would fork the whole suite.
-func spawnLearnWorker(base string) {
+func spawnLearnWorker(base string, scanCodex, finalScan bool) {
 	if os.Getenv("CULI_NO_LEARN_SPAWN") != "" {
 		return
 	}
@@ -265,13 +275,29 @@ func spawnLearnWorker(base string) {
 		logf(base, "session-end: resolving executable: %v", err)
 		return
 	}
-	cmd := exec.Command(exe, "learn", "--auto")
+	cmd := exec.Command(exe, learnWorkerArgs(scanCodex, finalScan)...)
 	detach(cmd) // own session: survives the hook's process group teardown
 	if err := cmd.Start(); err != nil {
 		logf(base, "session-end: spawning learn worker: %v", err)
 		return
 	}
 	_ = cmd.Process.Release()
+}
+
+// learnWorkerArgs maps the spawn flags to CLI args. Invariant: finalScan
+// (--scan-codex-force, which bypasses the 10-minute scan throttle) is only ever
+// true for the SessionEnd flush — the one-shot end of a session. It must never
+// be wired to Stop or any frequently-firing event, or the forced scan would
+// defeat the throttle and run a read-only DB scan on every turn.
+func learnWorkerArgs(scanCodex, finalScan bool) []string {
+	args := []string{"learn", "--auto"}
+	if scanCodex {
+		args = append(args, "--scan-codex")
+	}
+	if finalScan {
+		args = append(args, "--scan-codex-force")
+	}
+	return args
 }
 
 func bodyLoader(ctx context.Context, s *store.Store) pack.BodyLoader {

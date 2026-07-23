@@ -244,6 +244,19 @@ func TestCodexStopEnqueuesPeriodicJob(t *testing.T) {
 	}
 }
 
+func TestCodexWorkerRequestsThrottledScan(t *testing.T) {
+	got := strings.Join(learnWorkerArgs(true, false), " ")
+	if got != "learn --auto --scan-codex" {
+		t.Fatalf("Codex worker args = %q", got)
+	}
+	if got := strings.Join(learnWorkerArgs(true, true), " "); got != "learn --auto --scan-codex --scan-codex-force" {
+		t.Fatalf("Codex final worker args = %q", got)
+	}
+	if got := strings.Join(learnWorkerArgs(false, false), " "); got != "learn --auto" {
+		t.Fatalf("Claude worker args = %q", got)
+	}
+}
+
 func TestCodexMissingTranscriptIsObservable(t *testing.T) {
 	base := sandbox(t)
 	raw, _ := json.Marshal(Input{SessionID: "s-empty", CWD: "/tmp"})

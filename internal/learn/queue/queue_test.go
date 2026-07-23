@@ -90,6 +90,28 @@ func TestEnqueueStableAndReadable(t *testing.T) {
 	if jobs[0].SessionID != "codex:s1" || jobs[0].EffectiveSource() != harness.Codex || !jobs[0].IsFinal() {
 		t.Fatalf("job=%+v", jobs[0])
 	}
+	if _, ok := ScannerBlockedTranscripts(dir)[job.TranscriptPath]; !ok {
+		t.Fatal("pending transcript was not detected")
+	}
+	if err := os.Rename(jobs[0].Path(), jobs[0].Path()+".f1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ScannerBlockedTranscripts(dir)[job.TranscriptPath]; !ok {
+		t.Fatal("retry-renamed transcript was not detected")
+	}
+	failed := filepath.Join(dir, "failed")
+	if err := os.Mkdir(failed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(jobs[0].Path()+".f1", filepath.Join(failed, filepath.Base(jobs[0].Path())+".f2")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := ScannerBlockedTranscripts(dir)[job.TranscriptPath]; !ok {
+		t.Fatal("parked transcript was not detected")
+	}
+	if _, ok := ScannerBlockedTranscripts(dir)["/tmp/other.jsonl"]; ok {
+		t.Fatal("unrelated transcript reported pending")
+	}
 }
 
 func TestListParksMalformedJob(t *testing.T) {

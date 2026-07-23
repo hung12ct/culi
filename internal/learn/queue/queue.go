@@ -39,9 +39,9 @@ type Job struct {
 // Enqueue atomically writes one stable transcript pointer. The filename is
 // derived from source+session+path, so re-running a history scan (or a hook
 // re-delivering the same session) overwrites in place instead of creating a
-// duplicate job. Cross-mechanism dedup is a latent safety property, not an
-// exercised path: in practice each transcript reaches the queue one way only —
-// Codex via history scan, Claude via the hook.
+// duplicate job. Codex can reach this boundary through either a direct hook
+// transcript path or the rollout scanner, so the stable key is an active
+// cross-mechanism safety property.
 func Enqueue(inboxDir string, job Job) error {
 	if job.TranscriptPath == "" {
 		return nil
@@ -79,6 +79,40 @@ func Enqueue(inboxDir string, job Job) error {
 	return nil
 }
 
+// ScannerBlockedTranscripts returns transcript paths that a rollout scanner
+// must not enqueue again. It includes active jobs, retry-renamed .json.fN
+// jobs, and jobs parked after exhausting their retry ladder. Without the
+// parked set, a periodic scan would silently resurrect a circuit-broken job
+// every ten minutes. This read-only helper never repairs malformed entries.
+func ScannerBlockedTranscripts(inboxDir string) map[string]struct{} {
+	out := map[string]struct{}{}
+	collectTranscriptPaths(out, inboxDir)
+	collectTranscriptPaths(out, filepath.Join(inboxDir, "failed"))
+	return out
+}
+
+func collectTranscriptPaths(out map[string]struct{}, dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.Contains(entry.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var job struct {
+			TranscriptPath string `json:"transcript_path"`
+		}
+		if json.Unmarshal(raw, &job) == nil && job.TranscriptPath != "" {
+			out[job.TranscriptPath] = struct{}{}
+		}
+	}
+}
+
 // Path returns the job file location; Attempts the prior failure count.
 func (j Job) Path() string  { return j.path }
 func (j Job) Attempts() int { return j.attempts }
@@ -93,8 +127,8 @@ func (j Job) EffectiveSource() harness.Harness {
 // Missing trigger is a job from the old SessionEnd-only queue format.
 func (j Job) IsFinal() bool { return j.Trigger == "" || j.Trigger == "session-end" }
 
-// List reads every pending job (including previously failed retries), oldest
-// first. A malformed job file is skipped, never fatal.
+// List reads every pending job (including previously failed retries), newest
+// first. A malformed job file is parked, never fatal.
 func List(inboxDir string) ([]Job, error) {
 	entries, err := os.ReadDir(inboxDir)
 	if err != nil {
@@ -182,9 +216,9 @@ func park(inboxDir, path string) error {
 	return nil
 }
 
-// throttle policy (plan §learning A): SessionEnd is the final flush and
-// bypasses the interval; periodic (Stop-hook) mining would additionally
-// require both minInterval and minNewBytes. All current jobs are session-end.
+// throttle policy (plan §learning A): SessionEnd and history-backfill jobs are
+// final flushes and bypass the interval; periodic Stop-hook jobs require both
+// minInterval and minNewBytes.
 const (
 	minInterval = 10 * time.Minute
 	minNewBytes = 16 << 10

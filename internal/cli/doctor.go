@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/harness"
+	"github.com/hung12ct/culi/internal/learn/codexscan"
 )
 
 // Doctor reports locally verifiable harness wiring. Codex does not expose its
@@ -60,9 +63,43 @@ func doctorCodex(w io.Writer) error {
 		fmt.Fprintln(w, "Last hook   none observed; start a new Codex session and submit a prompt")
 	}
 
+	scanCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	sessions, skipped, scanErr := codexscan.Discover(scanCtx, home)
+	cancel()
+	if scanErr != nil {
+		fmt.Fprintf(w, "Scanner     unavailable: %s\n", safeScanError(scanErr, base, home))
+	} else {
+		fmt.Fprintf(w, "Scanner     ready (%d rollout(s) discoverable, %d skipped)\n", len(sessions), skipped)
+	}
+	health, healthErr := codexscan.LoadHealth(config.StateDir(base))
+	fmt.Fprintf(w, "Last scan   %s\n", formatCodexScanHealth(health, healthErr))
+
 	pending := pendingCodexJobs(config.InboxDir(base))
 	fmt.Fprintf(w, "Learning    %d Codex transcript job(s) pending\n", pending)
 	return nil
+}
+
+func formatCodexScanHealth(h codexscan.Health, err error) string {
+	if err != nil {
+		return "health unreadable: " + err.Error()
+	}
+	if h.LastAttempt.IsZero() {
+		return "never (automatic fallback runs from Codex lifecycle hooks)"
+	}
+	stamp := h.LastAttempt.UTC().Format(time.RFC3339)
+	mode := h.Mode
+	if mode == "" {
+		mode = "unknown"
+	}
+	if h.Error != "" {
+		lastOK := ""
+		if !h.LastSuccess.IsZero() {
+			lastOK = "; last success " + h.LastSuccess.UTC().Format(time.RFC3339)
+		}
+		return fmt.Sprintf("%s %s failed: %s%s", stamp, mode, h.Error, lastOK)
+	}
+	return fmt.Sprintf("%s %s ok (%d discovered, %d queued, %d skipped, %dms)",
+		stamp, mode, h.Discovered, h.Queued, h.Skipped, h.DurationMS)
 }
 
 // pendingCodexJobs is deliberately read-only. A doctor command must not park

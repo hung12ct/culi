@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/hung12ct/culi/internal/learn/codexscan"
 )
 
 func TestCodexMCPConfiguredForms(t *testing.T) {
@@ -23,6 +27,27 @@ func TestCodexMCPConfiguredForms(t *testing.T) {
 		if got := codexMCPConfigured(path); got != want[name] {
 			t.Errorf("%s: codexMCPConfigured=%v, want %v", name, got, want[name])
 		}
+	}
+}
+
+func TestFormatCodexScanHealth(t *testing.T) {
+	if got := formatCodexScanHealth(codexscan.Health{}, nil); !strings.Contains(got, "never") {
+		t.Fatalf("empty health = %q", got)
+	}
+	now := time.Date(2026, 7, 23, 12, 0, 0, 0, time.UTC)
+	h := codexscan.Health{
+		LastAttempt: now, LastSuccess: now, Mode: "auto",
+		Discovered: 5, Queued: 2, Skipped: 1, DurationMS: 42,
+	}
+	if got := formatCodexScanHealth(h, nil); !strings.Contains(got, "auto ok") || !strings.Contains(got, "5 discovered, 2 queued") {
+		t.Fatalf("success health = %q", got)
+	}
+	h.Error = "state database busy"
+	if got := formatCodexScanHealth(h, nil); !strings.Contains(got, "failed") || !strings.Contains(got, "last success") {
+		t.Fatalf("failed health = %q", got)
+	}
+	if got := formatCodexScanHealth(codexscan.Health{}, errors.New("bad json")); !strings.Contains(got, "health unreadable") {
+		t.Fatalf("bad health = %q", got)
 	}
 }
 
