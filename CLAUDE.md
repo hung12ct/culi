@@ -24,6 +24,8 @@ schemas, learning pipelines, phased roadmap).
   `expand_card`, `save_lesson`.
 - **Learning** (`internal/learn/`): Claude/Codex transcript mining, style synthesis, branch→CLAUDE.md/AGENTS.md generation,
   cross-branch patterns — OpenAI/Anthropic API, Codex/Claude terminal, or Ollama backends behind hard daily caps.
+  Codex lifecycle workers also perform a throttled read-only rollout scan as a missing-`transcript_path` fallback;
+  scanner telemetry is content-free and surfaced by `culi doctor`.
 - **Embeddings**: local Ollama (nomic-embed-text) behind gopheragent's `tools.Embedder`; every path
   degrades gracefully to BM25-only when Ollama is down.
 - **Review console**: `culi serve` — local `net/http` server (`internal/serve/`) serving an embedded
