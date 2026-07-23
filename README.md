@@ -11,7 +11,7 @@
 
 **culi** (cà phê culi — the single dense peaberry bean) keeps Claude Code and Codex context — rules, skills, lessons, styles, patterns — as small markdown "cards" in one place. On every prompt it pushes the most relevant token-budgeted slice through harness hooks, exposes deeper retrieval through MCP, and quietly **learns** from both transcript formats.
 
-In short: **self-improving agent memory and context engineering for Claude Code** — the memory-and-context layer that plugs into its harness and decides what Claude should know at each step, so you stop re-teaching it and stop paying for context it doesn't need.
+In short: **self-improving agent memory and context engineering for Claude Code and Codex** — the memory-and-context layer that decides what each agent should know at each step, so you stop re-teaching it and stop paying for context it doesn't need.
 
 No Node, no Python, no daemon required. One static Go binary.
 
@@ -34,14 +34,14 @@ If you use Claude Code across more than one repo, you probably have this problem
 
 ## Screenshots
 
-The `culi serve` review console — a health overview with real token-savings, a review queue for
+The `culi serve` context control console — system health, next actions, real token-savings, and a review queue for
 mined candidates, a searchable knowledge base, a per-conversation injection log, and editable settings.
 
 | Overview — token savings & card health | Review — approve/reject mined candidates |
 |---|---|
 | ![Overview](docs/overview.png) | ![Review](docs/review.png) |
 
-| Knowledge base — searchable card store | Activity — exactly which cards Claude saw, per conversation |
+| Knowledge base — searchable card store | Activity — exactly which cards each agent saw, per conversation |
 |---|---|
 | ![Knowledge base](docs/knowledge-base.png) | ![Activity](docs/activity.png) |
 
@@ -82,13 +82,13 @@ your prompt ─► [gate: skip acks/pastes] ─► scope + keyword + semantic ma
 
 ---
 
-## The review console
+## Context control console
 
 ```bash
 culi serve      # → http://localhost:7378
 ```
 
-A local web UI to see and steer everything culi does: a health **overview** with real token-savings, a **review** queue for mined candidate cards, a searchable **knowledge base**, and an **activity** log showing exactly which cards Claude saw in each conversation (and why).
+A local web UI to see and steer everything Culi does: system health and next actions, an evidence-first **review** queue, searchable **knowledge**, and an **activity** trace showing exactly which cards Claude or Codex received and why. The product direction is documented in [docs/VISION.md](docs/VISION.md).
 
 ---
 
@@ -111,13 +111,22 @@ Pick a backend with `learn.provider` (default `auto`):
 
 | Provider | Cost | How | Notes |
 |---|---|---|---|
+| `codex-cli` | **Account quota** | Runs an ephemeral, read-only `codex exec` with your existing Codex login | No separate `OPENAI_API_KEY`; `$0.00` in Culi's spend meter |
+| `openai` | **Paid** (metered) | OpenAI API + `OPENAI_API_KEY` | Structured output; tracked and capped by `daily_usd_cap` |
 | `claude-cli` | **Free** | Shells out to `claude -p` on your Claude Code subscription | `$0.00` in the spend meter |
 | `anthropic` | **Paid** (metered) | Anthropic API via [gopheragent](https://github.com/hung12ct/gopheragent) + `ANTHROPIC_API_KEY` | Tracks real USD; capped by `daily_usd_cap` |
 | `ollama` | **Free** (local) | Local models — set `cheap_model`/`strong_model` to non-Claude models | Runs on your machine |
 | `none` | — | Disabled | Mining queues but never calls a model |
 
-`auto` prefers the Anthropic API when a key is available (env **or** `anthropic_api_key_file`),
-otherwise falls back to the free `claude-cli`.
+`auto` keeps existing behavior and chooses the first ready backend in this order: Anthropic API,
+OpenAI API, Claude terminal, then Codex terminal. API credentials may come from the environment or
+their configured key file. Ollama remains opt-in so Culi never silently selects an unprepared local
+generation model.
+
+For OpenAI, Culi starts routine mining with `gpt-5.6-luna` and escalates schema failures to
+`gpt-5.6-terra`; the Codex terminal starts with `gpt-5.6-terra` and escalates to `gpt-5.6-sol`.
+These follow OpenAI's current [model catalog](https://developers.openai.com/api/docs/models) and
+can be changed under Settings → Learning backend.
 
 ### Local models (Ollama) — free, private, no auth
 
@@ -145,8 +154,8 @@ expect noisier candidates — your review queue is the quality gate. Speed is GP
 
 Both must pass before any call; they reset at **UTC midnight**:
 
-- **`daily_usd_cap`** (default `$0.50`) — bounds estimated API spend. Only bites on the
-  `anthropic` backend; `claude-cli`/`ollama` cost `$0`.
+- **`daily_usd_cap`** (default `$0.50`) — bounds estimated API spend. It applies to the
+  `openai` and `anthropic` backends; terminal providers and Ollama cost `$0` in Culi's ledger.
 - **`daily_call_cap`** (default `40`) — bounds model calls on *every* backend — the
   subscription-quota guard.
 
@@ -155,18 +164,20 @@ cap — it halts the run and keeps jobs queued, so a misconfig can't silently dr
 
 ### Auth
 
-Background learning runs `claude -p` (or the Anthropic API) from a *detached* hook process, so it
-needs a credential that process can read. **A normal, persisted login is enough** — it lives on
+Background learning runs its selected backend from a *detached* hook process, so it needs a
+credential that process can read. **A normal, persisted terminal login is enough** — it lives on
 disk, so every process (including the background worker) uses it:
 
-- **Subscription** — run `claude auth login` once. Background learning then just works, no
-  culi config needed.
-- **API key** — set `ANTHROPIC_API_KEY` where processes can see it (a login-shell / system env).
-  `provider: auto` uses it whenever present.
+- **Codex / ChatGPT subscription** — run `codex login`, then choose `codex-cli`. Culi invokes an
+  ephemeral, read-only Codex process and marks it internal, preventing learning calls from being
+  re-ingested as user sessions.
+- **Claude subscription** — run `claude auth login`, then choose `claude-cli`.
+- **API key** — set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` where detached processes can see it,
+  or use the corresponding key-file setting. API use is separate from terminal subscription auth.
 
 Manual `culi learn` from your terminal always works too — it inherits whatever your shell has.
 
-**The one gotcha is env-var-only auth.** If your *only* credential is an env var exported in your
+**The one gotcha is shell-only auth.** If your *only* credential is an env var exported in your
 shell (e.g. `CLAUDE_CODE_OAUTH_TOKEN` in `.zshrc`, with no `claude auth login`), the detached hook
 process doesn't inherit it — background mining fails with "Not logged in" even though your terminal
 works. Two fixes:
@@ -180,6 +191,7 @@ works. Two fixes:
    learn:
      oauth_token_file: ~/.claude-tokens/account.token  # holds CLAUDE_CODE_OAUTH_TOKEN
      # anthropic_api_key_file: ~/.anthropic/api-key     # OR holds ANTHROPIC_API_KEY
+     # openai_api_key_file: ~/.openai/api-key           # OR holds OPENAI_API_KEY
    ```
 
    Useful when you keep credentials in files, or want learning to use a *different* account than
@@ -200,16 +212,17 @@ Full config (all optional; shown with defaults):
 ```yaml
 learn:
   enabled: true
-  provider: auto              # auto | anthropic | claude-cli | ollama | none
+  provider: auto              # auto | codex-cli | openai | claude-cli | anthropic | ollama | none
   cheap_model: claude-haiku-4-5
   strong_model: claude-sonnet-5
-  daily_usd_cap: 0.50         # anthropic backend only
+  daily_usd_cap: 0.50         # OpenAI/Anthropic API backends
   daily_call_cap: 40          # all backends
   max_jobs_per_run: 50        # transcripts mined per run, newest first; -1 = no limit
   confirm_at: 2               # observations to auto-confirm a candidate; 1 = on first sighting
   candidate_ttl_days: 30      # auto-retire unreviewed candidates; -1 disables
   oauth_token_file: ""        # headless subscription auth (see above)
-  anthropic_api_key_file: ""  # headless API auth (see above)
+  anthropic_api_key_file: ""  # optional ANTHROPIC_API_KEY file
+  openai_api_key_file: ""     # optional OPENAI_API_KEY file; not used by codex-cli
 ```
 
 ---
@@ -221,7 +234,7 @@ learn:
 | `culi init [--harness=auto\|claude\|codex\|all]` | Set up `~/.culi`, register selected hooks + MCP |
 | `culi doctor [--harness=codex]` | Verify Codex hooks/MCP, timeout alignment, recent activity, and pending learning |
 | `culi learn --scan-codex [--dry-run]` | Discover and backfill Codex rollout history (`--dry-run` only lists it) |
-| `culi serve` | Local web review console (default `localhost:7378`) |
+| `culi serve` | Local context control console (default `localhost:7378`) |
 | `culi query <text>` | Debug retrieval from the terminal |
 | `culi stats` | Token accounting, gate economics, learning spend |
 | `culi import scan\|merge\|apply` | Reconcile `.claude`, CLAUDE.md, and root/global AGENTS.md guidance |

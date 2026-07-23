@@ -16,13 +16,14 @@ schemas, learning pipelines, phased roadmap).
 
 - **One binary `culi`**, subcommand dispatch in `cmd/culi/main.go` (stdlib `flag`, no cobra).
 - **Files are truth**: `~/.culi/knowledge/` (git-init'd markdown cards with YAML frontmatter) is the
-  source of truth; `~/.culi/index.db` (SQLite via `modernc.org/sqlite`: FTS5 BM25 + embedding blobs)
-  is disposable — schema change ⇒ drop & rebuild, never ALTER migrations.
+  source of truth for cards; `~/.culi/index.db` provides SQLite FTS5 BM25 + embeddings and also
+  holds runtime activity. Card-search tables are rebuildable, while explicit forward migrations
+  preserve injections, card stats, session state, and metadata across schema changes.
 - **Push**: `culi hook <event>` — normalized Claude/Codex UserPromptSubmit, SessionStart, Stop, and SessionEnd adapters.
 - **Pull**: `culi mcp` — stdio MCP server (`modelcontextprotocol/go-sdk`): `search_context`,
   `expand_card`, `save_lesson`.
 - **Learning** (`internal/learn/`): Claude/Codex transcript mining, style synthesis, branch→CLAUDE.md/AGENTS.md generation,
-  cross-branch patterns — Haiku for routine steps, Sonnet escalation, hard daily USD cap.
+  cross-branch patterns — OpenAI/Anthropic API, Codex/Claude terminal, or Ollama backends behind hard daily caps.
 - **Embeddings**: local Ollama (nomic-embed-text) behind gopheragent's `tools.Embedder`; every path
   degrades gracefully to BM25-only when Ollama is down.
 - **Review console**: `culi serve` — local `net/http` server (`internal/serve/`) serving an embedded

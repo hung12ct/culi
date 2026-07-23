@@ -91,28 +91,30 @@ ollama:
 #   provider: auto
 #   merge_model: claude-sonnet-5
 # learn:
-#   # background transcript mining (lessons/rules/style). Same backend
-#   # options as import.provider; both daily caps must pass for a call.
+#   # Background transcript mining (lessons/rules/style). API, terminal, and
+#   # local backends are independent of import.provider.
 #   enabled: true
-#   provider: auto
+#   provider: auto          # auto | codex-cli | openai | claude-cli |
+#                           # anthropic | ollama | none
 #   cheap_model: claude-haiku-4-5
 #   strong_model: claude-sonnet-5
-#   daily_usd_cap: 0.50    # anthropic API only; claude-cli/ollama cost $0
-#   daily_call_cap: 40     # all backends - the subscription-quota guard
+#   daily_usd_cap: 0.50    # OpenAI/Anthropic API; terminal/Ollama cost $0
+#   daily_call_cap: 40     # every backend - the subscription-quota guard
 #   candidate_ttl_days: 30 # auto-retire candidates unreinforced this long;
 #                          # -1 disables. Confirmed cards are never auto-retired.
 #   max_jobs_per_run: 50   # transcripts mined per learn run, newest first;
 #                          # -1 = no limit. learn --no-cap drains everything.
 #   confirm_at: 2          # observations to auto-confirm a candidate (no review);
 #                          # 1 = confirm on first sighting (noisier), higher = stricter.
-#   # Headless-learning auth (pick ONE; both empty/unset = off, ~ expands):
-#   # Claude Code doesn't pass its OAuth token or an API key to hook-spawned
-#   # processes, so background mining gets "Not logged in". Point culi at a file:
-#   #   • subscription (free)   — a file holding CLAUDE_CODE_OAUTH_TOKEN:
+#   # Terminal providers reuse persisted logins: codex login or
+#   # claude auth login. Optional key/token files support headless setups;
+#   # paths expand ~ and secret contents are never logged.
+#   #   • Claude subscription — file holding CLAUDE_CODE_OAUTH_TOKEN:
 #   oauth_token_file: ~/.claude-tokens/account-my.token
-#   #   • metered API (paid)    — a file holding ANTHROPIC_API_KEY; also makes
-#   #                             provider:auto prefer the API and track real $:
+#   #   • Anthropic API — file holding ANTHROPIC_API_KEY:
 #   anthropic_api_key_file: ~/.anthropic/api-key
+#   #   • OpenAI API — file holding OPENAI_API_KEY (not needed for codex-cli):
+#   openai_api_key_file: ~/.openai/api-key
 `
 		if err := os.WriteFile(cfgPath, []byte(defaultCfg), 0o644); err != nil {
 			return fmt.Errorf("cli: writing config.yaml: %w", err)
