@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // InjectionRow is one logged card injection with its timestamp — the raw
@@ -42,6 +43,33 @@ func (s *Store) RecentInjections(ctx context.Context, limit int) ([]InjectionRow
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// InjectionsSince returns every retained injection at or after cutoff, oldest
+// first. It is intentionally uncapped: analytics needs the complete retention
+// window, while RecentInjections is the bounded feed used by the Activity UI.
+// This query is only used by the local console and never runs on a hook path.
+func (s *Store) InjectionsSince(ctx context.Context, cutoff time.Time) ([]InjectionRow, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT session_id, ts, event, card_id, granularity, tokens, cwd, harness
+		FROM injections WHERE ts >= ? ORDER BY ts ASC`, cutoff.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return nil, fmt.Errorf("store: reading injection window: %w", err)
+	}
+	defer rows.Close()
+
+	var out []InjectionRow
+	for rows.Next() {
+		var r InjectionRow
+		if err := rows.Scan(&r.SessionID, &r.TS, &r.Event, &r.CardID, &r.Granularity, &r.Tokens, &r.Cwd, &r.Harness); err != nil {
+			return nil, fmt.Errorf("store: scanning injection window row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: iterating injection window: %w", err)
+	}
+	return out, nil
 }
 
 // DailyTokens returns injected-token totals per calendar day (UTC), oldest

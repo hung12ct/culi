@@ -1,6 +1,6 @@
-// Package store owns the SQLite index. The DB is a disposable cache of the
-// knowledge file store: schema changes bump schemaVersion and trigger a full
-// drop-and-rebuild — never an ALTER migration.
+// Package store owns the SQLite index. Knowledge-card search data can be
+// rebuilt from files; runtime injection history is preserved by explicit
+// schema migrations.
 package store
 
 import (
@@ -13,14 +13,25 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schemaVersion is compared against PRAGMA user_version at open; a mismatch
-// drops every table and recreates. Only disposable history is lost.
+// schemaVersion is compared against PRAGMA user_version at open. Every bump
+// must add an in-place migration below; an unknown version fails closed rather
+// than risking user activity history.
 //
 // v2: injections gained a `cwd` column so the review console can show which
 // repo each injection happened in.
 // v3: injections gained a `harness` column so attribution (claude vs codex) is
 // authoritative rather than parsed out of the session_id prefix.
 const schemaVersion = 3
+
+var schemaMigrations = map[int][]string{
+	1: {
+		"ALTER TABLE injections ADD COLUMN cwd TEXT NOT NULL DEFAULT ''",
+	},
+	2: {
+		"ALTER TABLE injections ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude'",
+		"UPDATE injections SET harness = 'codex' WHERE session_id LIKE 'codex:%'",
+	},
+}
 
 // Store wraps the SQLite handle. Safe for concurrent use (database/sql pools;
 // WAL allows one writer + many readers).
@@ -50,13 +61,30 @@ func Open(ctx context.Context, path string) (*Store, error) {
 // Close releases the underlying pool.
 func (s *Store) Close() error { return s.db.Close() }
 
-// Rebuild drops all tables and recreates the schema. Callers re-index from
-// the file store afterwards.
+// Rebuild recreates only the file-backed card search index. Runtime-only
+// injections, card stats, session state, and metadata are preserved.
 func (s *Store) Rebuild(ctx context.Context) error {
-	if err := s.dropAll(ctx); err != nil {
-		return err
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: beginning card-index rebuild: %w", err)
 	}
-	return s.createSchema(ctx)
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		"DROP TABLE IF EXISTS cards_fts",
+		"DROP TABLE IF EXISTS embeddings",
+		"DROP TABLE IF EXISTS cards",
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("store: rebuilding card index: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, cardSchemaDDL); err != nil {
+		return fmt.Errorf("store: recreating card index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: committing card-index rebuild: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) ensureSchema(ctx context.Context) error {
@@ -64,37 +92,69 @@ func (s *Store) ensureSchema(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&v); err != nil {
 		return fmt.Errorf("store: reading user_version: %w", err)
 	}
-	if v == schemaVersion {
+	switch {
+	case v == schemaVersion:
 		return nil
+	case v == 0:
+		return s.createSchema(ctx)
+	case v > schemaVersion:
+		return fmt.Errorf("store: database schema version %d is newer than supported version %d", v, schemaVersion)
+	default:
+		return s.migrateSchema(ctx)
 	}
-	if v != 0 {
-		// Version mismatch: drop and rebuild rather than migrate.
-		if err := s.dropAll(ctx); err != nil {
-			return err
-		}
-	}
-	return s.createSchema(ctx)
 }
 
-func (s *Store) dropAll(ctx context.Context) error {
-	for _, stmt := range []string{
-		"DROP TABLE IF EXISTS cards_fts",
-		"DROP TABLE IF EXISTS embeddings",
-		"DROP TABLE IF EXISTS injections",
-		"DROP TABLE IF EXISTS session_state",
-		"DROP TABLE IF EXISTS card_stats",
-		"DROP TABLE IF EXISTS cards",
-		"DROP TABLE IF EXISTS meta",
-	} {
-		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("store: dropping tables: %w", err)
+// migrateSchema advances the schema to schemaVersion under a single write lock.
+// It pins one pooled connection and opens with BEGIN IMMEDIATE so that two
+// sessions racing their first Open after a binary upgrade serialize here: the
+// winner migrates and bumps user_version, the loser re-reads the bumped version
+// inside the lock and no-ops rather than replaying non-idempotent ALTERs (which
+// would fail with "duplicate column name"). busy_timeout(2000) makes the loser
+// wait out the winner instead of erroring immediately.
+func (s *Store) migrateSchema(ctx context.Context) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("store: acquiring migration connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("store: beginning schema migration: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			// Best-effort rollback; use a fresh context so a cancelled ctx
+			// still releases the write lock.
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	var from int
+	if err := conn.QueryRowContext(ctx, "PRAGMA user_version").Scan(&from); err != nil {
+		return fmt.Errorf("store: re-reading user_version: %w", err)
+	}
+	for from < schemaVersion {
+		stmts, ok := schemaMigrations[from]
+		if !ok {
+			return fmt.Errorf("store: no migration from schema version %d", from)
+		}
+		for _, stmt := range stmts {
+			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("store: migrating schema version %d: %w", from, err)
+			}
+		}
+		from++
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", from)); err != nil {
+			return fmt.Errorf("store: setting migrated schema version %d: %w", from, err)
 		}
 	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("store: committing schema migration: %w", err)
+	}
+	committed = true
 	return nil
 }
 
-func (s *Store) createSchema(ctx context.Context) error {
-	const ddl = `
+const cardSchemaDDL = `
 CREATE TABLE cards (
   rowid        INTEGER PRIMARY KEY,
   id           TEXT NOT NULL UNIQUE,
@@ -134,7 +194,9 @@ CREATE TABLE embeddings (
   vec          BLOB NOT NULL,
   content_hash TEXT NOT NULL
 );
+`
 
+const runtimeSchemaDDL = `
 CREATE TABLE injections (
   id INTEGER PRIMARY KEY,
   session_id  TEXT NOT NULL,
@@ -167,7 +229,9 @@ CREATE TABLE card_stats (
 
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `
-	if _, err := s.db.ExecContext(ctx, ddl); err != nil {
+
+func (s *Store) createSchema(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, cardSchemaDDL+runtimeSchemaDDL); err != nil {
 		return fmt.Errorf("store: creating schema: %w", err)
 	}
 	if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {

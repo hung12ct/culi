@@ -68,3 +68,27 @@ func TestAllCardStatsDecays(t *testing.T) {
 		t.Errorf("decayed expanded = %f", st.Expanded)
 	}
 }
+
+func TestInjectionsSinceReturnsCompleteWindow(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	rec := []InjectionRecord{{CardID: "a", Granularity: GranSummary, Tokens: 42}}
+	if err := s.RecordInjections(ctx, "old", "user-prompt-submit", "", "/repo", harness.Claude, rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordInjections(ctx, "new", "user-prompt-submit", "", "/repo", harness.Codex, rec); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().AddDate(0, 0, -8).Format(time.RFC3339Nano)
+	if _, err := s.db.ExecContext(ctx, "UPDATE injections SET ts = ? WHERE session_id = 'old'", old); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := s.InjectionsSince(ctx, time.Now().UTC().AddDate(0, 0, -7))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].SessionID != "new" {
+		t.Fatalf("rows = %+v, want only new session", rows)
+	}
+}

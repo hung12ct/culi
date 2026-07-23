@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/store"
 )
 
@@ -106,6 +107,11 @@ func TestFullRebuild(t *testing.T) {
 	if _, err := Sync(ctx, s, kdir); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.RecordInjections(ctx, "codex:s1", "user-prompt-submit", "", "", harness.Codex, []store.InjectionRecord{
+		{CardID: "rules/a", Granularity: store.GranSummary, Tokens: 12},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	// Poison the DB with a card whose file no longer exists, then Full must
 	// end with exactly the on-disk truth.
 	res, err := Full(ctx, s, kdir)
@@ -115,5 +121,8 @@ func TestFullRebuild(t *testing.T) {
 	all, err := s.AllCards(ctx)
 	if err != nil || len(all) != 1 || all[0].ID != "rules/a" {
 		t.Fatalf("after full: %v, %v", all, err)
+	}
+	if sessions, err := s.SessionCount(ctx); err != nil || sessions != 1 {
+		t.Fatalf("sessions after full = %d, %v; want preserved", sessions, err)
 	}
 }

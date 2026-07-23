@@ -16,7 +16,7 @@ import (
 // keeps working regardless.
 func Index(args []string) error {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
-	full := fs.Bool("full", false, "drop the index and rebuild from files")
+	full := fs.Bool("full", false, "rebuild card search from files (preserves activity history)")
 	noEmbed := fs.Bool("no-embed", false, "skip the embedding pass")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)

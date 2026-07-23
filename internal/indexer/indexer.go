@@ -65,7 +65,8 @@ func Sync(ctx context.Context, s *store.Store, knowledgeDir string) (Result, err
 	return res, nil
 }
 
-// Full drops the index and re-syncs everything from files.
+// Full rebuilds the file-backed card index and re-syncs everything from files.
+// Runtime injection history and card stats are preserved by Store.Rebuild.
 func Full(ctx context.Context, s *store.Store, knowledgeDir string) (Result, error) {
 	if err := s.Rebuild(ctx); err != nil {
 		return Result{}, fmt.Errorf("indexer: rebuild: %w", err)

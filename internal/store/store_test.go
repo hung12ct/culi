@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -176,7 +177,7 @@ func TestShortIDStable(t *testing.T) {
 	}
 }
 
-func TestRebuildOnVersionMismatch(t *testing.T) {
+func TestMigrateV2PreservesRuntimeData(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "index.db")
@@ -187,22 +188,150 @@ func TestRebuildOnVersionMismatch(t *testing.T) {
 	if err := s.UpsertCard(ctx, card("rules/x", "X", "s", "b"), 1, 10); err != nil {
 		t.Fatal(err)
 	}
-	// Simulate an old schema version.
-	if _, err := s.db.ExecContext(ctx, "PRAGMA user_version = 999"); err != nil {
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO injections(session_id,event,card_id,granularity,tokens,cwd,harness)
+		VALUES ('codex:s1','user-prompt-submit','rules/x','summary',12,'/repo','codex');
+		INSERT INTO card_stats(card_id,injected) VALUES ('rules/x',3);
+		INSERT INTO session_state(session_id,last_prompt) VALUES ('codex:s1','hello');
+		INSERT INTO meta(key,value) VALUES ('cursor','kept');
+		DROP INDEX idx_inj_session;
+		ALTER TABLE injections RENAME TO injections_v3;
+		CREATE TABLE injections (
+		  id INTEGER PRIMARY KEY,
+		  session_id TEXT NOT NULL,
+		  ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  event TEXT NOT NULL,
+		  card_id TEXT NOT NULL,
+		  granularity TEXT NOT NULL,
+		  prompt_hash TEXT NOT NULL DEFAULT '',
+		  tokens INTEGER NOT NULL,
+		  cwd TEXT NOT NULL DEFAULT ''
+		);
+		INSERT INTO injections(id,session_id,ts,event,card_id,granularity,prompt_hash,tokens,cwd)
+		SELECT id,session_id,ts,event,card_id,granularity,prompt_hash,tokens,cwd FROM injections_v3;
+		DROP TABLE injections_v3;
+		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
+		PRAGMA user_version = 2;
+	`); err != nil {
 		t.Fatal(err)
 	}
 	s.Close()
 
 	s2, err := Open(ctx, path)
 	if err != nil {
-		t.Fatalf("reopen with version mismatch: %v", err)
+		t.Fatalf("reopen v2 store: %v", err)
 	}
 	defer s2.Close()
 	all, err := s2.AllCards(ctx)
 	if err != nil {
-		t.Fatalf("AllCards after rebuild: %v", err)
+		t.Fatalf("AllCards after migration: %v", err)
 	}
-	if len(all) != 0 {
-		t.Fatalf("rebuild kept %d cards, want 0 (index is disposable)", len(all))
+	if len(all) != 1 {
+		t.Fatalf("migration kept %d cards, want 1", len(all))
+	}
+	var gotHarness, cursor string
+	if err := s2.db.QueryRowContext(ctx, "SELECT harness FROM injections WHERE session_id = 'codex:s1'").Scan(&gotHarness); err != nil {
+		t.Fatal(err)
+	}
+	if gotHarness != "codex" {
+		t.Fatalf("migrated harness = %q, want codex", gotHarness)
+	}
+	if err := s2.db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key = 'cursor'").Scan(&cursor); err != nil {
+		t.Fatal(err)
+	}
+	if cursor != "kept" {
+		t.Fatalf("meta cursor = %q, want kept", cursor)
+	}
+	for table, want := range map[string]int{"card_stats": 1, "session_state": 1, "injections": 1} {
+		var got int
+		if err := s2.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("%s rows = %d, want %d", table, got, want)
+		}
+	}
+}
+
+func TestMigrateV1AddsRuntimeAttribution(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "index.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, `
+		INSERT INTO injections(session_id,event,card_id,granularity,tokens,cwd,harness)
+		VALUES ('codex:s1','user-prompt-submit','rules/x','hook',4,'/repo','codex');
+		DROP INDEX idx_inj_session;
+		ALTER TABLE injections RENAME TO injections_v3;
+		CREATE TABLE injections (
+		  id INTEGER PRIMARY KEY,
+		  session_id TEXT NOT NULL,
+		  ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+		  event TEXT NOT NULL,
+		  card_id TEXT NOT NULL,
+		  granularity TEXT NOT NULL,
+		  prompt_hash TEXT NOT NULL DEFAULT '',
+		  tokens INTEGER NOT NULL
+		);
+		INSERT INTO injections(id,session_id,ts,event,card_id,granularity,prompt_hash,tokens)
+		SELECT id,session_id,ts,event,card_id,granularity,prompt_hash,tokens FROM injections_v3;
+		DROP TABLE injections_v3;
+		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
+		PRAGMA user_version = 1;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen v1 store: %v", err)
+	}
+	defer s2.Close()
+	var cwd, gotHarness string
+	if err := s2.db.QueryRowContext(ctx, "SELECT cwd,harness FROM injections WHERE session_id = 'codex:s1'").Scan(&cwd, &gotHarness); err != nil {
+		t.Fatal(err)
+	}
+	if cwd != "" || gotHarness != "codex" {
+		t.Fatalf("migrated attribution = cwd %q, harness %q; want empty cwd and codex", cwd, gotHarness)
+	}
+}
+
+func TestNewerSchemaIsRejectedWithoutDataLoss(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "index.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertCard(ctx, card("rules/x", "X", "s", "b"), 1, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA user_version = 999"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Open(ctx, path); err == nil {
+		t.Fatal("Open newer schema succeeded, want an error")
+	}
+
+	db, err := sql.Open("sqlite", "file:"+path+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var cards int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM cards").Scan(&cards); err != nil {
+		t.Fatal(err)
+	}
+	if cards != 1 {
+		t.Fatalf("newer-schema check kept %d cards, want 1", cards)
 	}
 }
