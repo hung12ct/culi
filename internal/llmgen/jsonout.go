@@ -7,7 +7,7 @@ import (
 )
 
 // schemaInstruction renders the JSON-schema demand appended to prompts for
-// backends without server-side schema enforcement (claude CLI). Kept blunt:
+// terminal backends that benefit from an explicit schema reminder. Kept blunt:
 // the anthropic path proved models still fence JSON when asked not to, so
 // decodeLooseJSON tolerates it anyway.
 func schemaInstruction(schema map[string]any) string {

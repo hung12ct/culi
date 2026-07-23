@@ -43,6 +43,7 @@ var knobs = map[string]knobSpec{
 	"strong_model":           {[]string{"learn", "strong_model"}, kindString},
 	"oauth_token_file":       {[]string{"learn", "oauth_token_file"}, kindString},
 	"anthropic_api_key_file": {[]string{"learn", "anthropic_api_key_file"}, kindString},
+	"openai_api_key_file":    {[]string{"learn", "openai_api_key_file"}, kindString},
 	"extra_acks":             {[]string{"extra_acks"}, kindList},
 	"extra_stopwords":        {[]string{"extra_stopwords"}, kindList},
 }

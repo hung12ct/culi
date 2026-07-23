@@ -22,16 +22,17 @@ learn:
 	}
 
 	n, err := SetKnobs(dir, map[string]string{
-		"push_budget":      "900",                            // top-level int, existing
-		"oauth_token_file": "~/.claude-tokens/account.token", // nested string, NEW under learn
-		"daily_call_cap":   "25",                             // nested int, existing
-		"bogus_key":        "ignored",                        // not whitelisted → skipped
+		"push_budget":         "900",                            // top-level int, existing
+		"oauth_token_file":    "~/.claude-tokens/account.token", // nested string, NEW under learn
+		"openai_api_key_file": "~/.openai/api-key",
+		"daily_call_cap":      "25",      // nested int, existing
+		"bogus_key":           "ignored", // not whitelisted → skipped
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 3 {
-		t.Errorf("applied = %d, want 3 (bogus_key ignored)", n)
+	if n != 4 {
+		t.Errorf("applied = %d, want 4 (bogus_key ignored)", n)
 	}
 
 	out, err := os.ReadFile(path)
@@ -46,6 +47,7 @@ learn:
 		"push_budget: 900",    // updated
 		"daily_call_cap: 25",  // updated nested
 		"oauth_token_file: ~/.claude-tokens/account.token", // new nested key added
+		"openai_api_key_file: ~/.openai/api-key",
 		"provider: auto", // untouched sibling preserved
 	} {
 		if !strings.Contains(s, want) {
@@ -62,7 +64,8 @@ learn:
 		t.Fatal(err)
 	}
 	if cfg.PushBudget != 900 || cfg.Learn.DailyCallCap != 25 ||
-		cfg.Learn.OAuthTokenFile != "~/.claude-tokens/account.token" {
+		cfg.Learn.OAuthTokenFile != "~/.claude-tokens/account.token" ||
+		cfg.Learn.OpenAIAPIKeyFile != "~/.openai/api-key" {
 		t.Errorf("reloaded = %+v", cfg)
 	}
 }

@@ -42,17 +42,17 @@ type LearnConfig struct {
 	// Enabled is the master switch (default true).
 	Enabled bool `yaml:"enabled"`
 	// Provider selects the mining backend like import.provider: auto (default),
-	// anthropic, claude-cli, ollama, or none.
+	// anthropic, openai, claude-cli, codex-cli, ollama, or none.
 	Provider string `yaml:"provider"`
 	// CheapModel handles routine mining; StrongModel is the one-step
 	// escalation on schema failures. For ollama both MUST be local models.
 	CheapModel  string `yaml:"cheap_model"`
 	StrongModel string `yaml:"strong_model"`
-	// DailyUSDCap bounds estimated API spend per day (anthropic backend only;
-	// claude-cli and ollama cost $0). 0 = default.
+	// DailyUSDCap bounds estimated API spend per day (OpenAI/Anthropic only;
+	// terminal providers and Ollama cost $0). 0 = default.
 	DailyUSDCap float64 `yaml:"daily_usd_cap"`
 	// DailyCallCap bounds model calls per day on every backend — the
-	// subscription-quota guard for claude-cli. 0 = default.
+	// subscription-quota guard for terminal providers. 0 = default.
 	DailyCallCap int `yaml:"daily_call_cap"`
 	// CandidateTTLDays auto-retires mined candidate cards left unreinforced for
 	// this many days (file mtime is the clock). 0 = default (30); a negative
@@ -81,6 +81,10 @@ type LearnConfig struct {
 	// subscription CLI. Empty (default) = off; the env var is used when set.
 	// Its presence also makes provider:auto prefer the Anthropic API. ~ expands.
 	AnthropicAPIKeyFile string `yaml:"anthropic_api_key_file"`
+	// OpenAIAPIKeyFile points the OpenAI API backend at a file holding an
+	// OPENAI_API_KEY. Empty uses the environment. This is metered API auth and
+	// is deliberately separate from the Codex CLI's ChatGPT/subscription login.
+	OpenAIAPIKeyFile string `yaml:"openai_api_key_file"`
 }
 
 // ImportConfig tunes `culi import merge`.
@@ -118,9 +122,24 @@ const (
 	defaultConfirmAt      = 2  // observations that auto-confirm a mined candidate
 )
 
-// InternalEnv marks a culi-spawned subprocess (the headless `claude -p` learning
-// calls in internal/llmgen). Those calls run under the user's Claude Code
-// settings, so they inherit culi's own hooks; the hook path checks this var and
+// RecommendedLearnModels returns provider-appropriate starting models for the
+// Settings UI and for safe fallback when a user switches provider but still
+// has model IDs from the previous vendor in config.yaml.
+func RecommendedLearnModels(provider string) (cheap, strong string) {
+	switch provider {
+	case "openai":
+		return "gpt-5.6-luna", "gpt-5.6-terra"
+	case "codex-cli":
+		return "gpt-5.6-terra", "gpt-5.6-sol"
+	case "ollama":
+		return "qwen3", "qwen3"
+	default: // auto, anthropic, claude-cli
+		return defaultCheapModel, defaultStrongModel
+	}
+}
+
+// InternalEnv marks a culi-spawned terminal-model subprocess (`claude -p` or
+// `codex exec`). Those calls can inherit culi's own hooks; the hook path checks this var and
 // no-ops for every event. Without it, each mining call would get context
 // injected into its prompt (UserPromptSubmit) and its transcript enqueued
 // (SessionEnd) — culi mining its own mining calls (self-ingestion loop).

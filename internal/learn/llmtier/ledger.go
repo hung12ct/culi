@@ -18,7 +18,7 @@ import (
 var ErrCapped = errors.New("llmtier: daily learning cap reached")
 
 // ErrBackendUnavailable reports the learning backend could not be reached in a
-// way retrying this run won't fix: the claude CLI is logged out, or the API key
+// way retrying this run won't fix: a terminal provider is logged out, or the API key
 // is missing/invalid. Workers stop the run and keep jobs queued (like
 // ErrCapped) — and, crucially, Generate does NOT fold such a failure into the
 // daily cap: it spent nothing and every queued job would fail identically, so
@@ -139,13 +139,19 @@ func (l *Ledger) Save() error {
 
 func day(t time.Time) string { return t.UTC().Format("2006-01-02") }
 
-// estimateUSD converts token usage to approximate dollars for the Anthropic
-// API backend. Rates are per million tokens, matched by model-name substring;
+// estimateUSD converts token usage to approximate dollars for metered API
+// backends. Rates are per million tokens, matched by model-name substring;
 // unknown models use the most expensive known rate so the cap errs safe.
 // Approximation is fine: this drives a stop-spending guard, not billing.
 func estimateUSD(model string, u llmgen.Usage) float64 {
 	in, out := 15.0, 75.0 // opus-class ceiling as the safe default
 	switch {
+	case strings.Contains(model, "gpt-5.6-luna"):
+		in, out = 1.0, 6.0
+	case strings.Contains(model, "gpt-5.6-terra"):
+		in, out = 2.5, 15.0
+	case strings.Contains(model, "gpt-5.6-sol") || strings.Contains(model, "gpt-5.6 ("):
+		in, out = 5.0, 30.0
 	case strings.Contains(model, "haiku"):
 		in, out = 1.0, 5.0
 	case strings.Contains(model, "sonnet"):

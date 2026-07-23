@@ -24,7 +24,7 @@ type Tier struct {
 	ledger  *Ledger
 	usdCap  float64
 	callCap int
-	priced  bool // anthropic API: estimate real dollars; CLI/ollama cost $0
+	priced  bool // metered APIs: estimate real dollars; terminal/Ollama cost $0
 }
 
 // NewTier assembles a tier directly. Resolve is the config-driven path; this
@@ -48,41 +48,75 @@ func Resolve(lc config.LearnConfig, ollamaEndpoint, stateDir string) (*Tier, str
 		return NewTier(cheap, strong, stateDir, lc.DailyUSDCap, lc.DailyCallCap, priced), desc, nil
 	}
 	anthropicPair := func() (*Tier, string, error) {
-		cheap, err := llmgen.NewAnthropic(lc.CheapModel, lc.AnthropicAPIKeyFile)
+		cheapModel, strongModel := providerModels(lc, "anthropic")
+		cheap, err := llmgen.NewAnthropic(cheapModel, lc.AnthropicAPIKeyFile)
 		if err != nil {
 			return nil, "", err
 		}
-		strong, err := llmgen.NewAnthropic(lc.StrongModel, lc.AnthropicAPIKeyFile)
+		strong, err := llmgen.NewAnthropic(strongModel, lc.AnthropicAPIKeyFile)
 		if err != nil {
 			return nil, "", err
 		}
-		return mk(cheap, strong, true, lc.CheapModel+"→"+lc.StrongModel+" via Anthropic API")
+		return mk(cheap, strong, true, cheapModel+"→"+strongModel+" via Anthropic API")
 	}
 	cliPair := func() (*Tier, string, error) {
-		cheap, err := llmgen.NewCLI(lc.CheapModel, lc.OAuthTokenFile)
+		cheapModel, strongModel := providerModels(lc, "claude-cli")
+		cheap, err := llmgen.NewCLI(cheapModel, lc.OAuthTokenFile)
 		if err != nil {
 			return nil, "", err
 		}
-		strong, err := llmgen.NewCLI(lc.StrongModel, lc.OAuthTokenFile)
+		strong, err := llmgen.NewCLI(strongModel, lc.OAuthTokenFile)
 		if err != nil {
 			return nil, "", err
 		}
-		return mk(cheap, strong, false, lc.CheapModel+"→"+lc.StrongModel+" via claude CLI")
+		return mk(cheap, strong, false, cheapModel+"→"+strongModel+" via claude CLI")
+	}
+	openAIPair := func() (*Tier, string, error) {
+		cheapModel, strongModel := providerModels(lc, "openai")
+		cheap, err := llmgen.NewOpenAI(cheapModel, lc.OpenAIAPIKeyFile)
+		if err != nil {
+			return nil, "", err
+		}
+		strong, err := llmgen.NewOpenAI(strongModel, lc.OpenAIAPIKeyFile)
+		if err != nil {
+			return nil, "", err
+		}
+		return mk(cheap, strong, true, cheapModel+"→"+strongModel+" via OpenAI API")
+	}
+	codexPair := func() (*Tier, string, error) {
+		cheapModel, strongModel := providerModels(lc, "codex-cli")
+		cheap, err := llmgen.NewCodexCLI(cheapModel)
+		if err != nil {
+			return nil, "", err
+		}
+		strong, err := llmgen.NewCodexCLI(strongModel)
+		if err != nil {
+			return nil, "", err
+		}
+		return mk(cheap, strong, false, cheapModel+"→"+strongModel+" via Codex CLI")
 	}
 
 	// A configured API-key file counts as "have a key" everywhere the env var
 	// does — headless learning reads the key from the file (see NewAnthropic).
-	haveAPIKey := os.Getenv("ANTHROPIC_API_KEY") != "" || lc.AnthropicAPIKeyFile != ""
+	haveAnthropicKey := os.Getenv("ANTHROPIC_API_KEY") != "" || lc.AnthropicAPIKeyFile != ""
+	haveOpenAIKey := os.Getenv("OPENAI_API_KEY") != "" || lc.OpenAIAPIKeyFile != ""
 	switch lc.Provider {
 	case "none":
 		return nil, "learning LLM disabled (learn.provider: none)", nil
 	case "anthropic":
-		if !haveAPIKey {
+		if !haveAnthropicKey {
 			return nil, "", fmt.Errorf("llmtier: provider anthropic needs ANTHROPIC_API_KEY (env or learn.anthropic_api_key_file)")
 		}
 		return anthropicPair()
+	case "openai":
+		if !haveOpenAIKey {
+			return nil, "", fmt.Errorf("llmtier: provider openai needs OPENAI_API_KEY (env or learn.openai_api_key_file)")
+		}
+		return openAIPair()
 	case "claude-cli":
 		return cliPair()
+	case "codex-cli":
+		return codexPair()
 	case "ollama":
 		if strings.HasPrefix(lc.CheapModel, "claude") || strings.HasPrefix(lc.StrongModel, "claude") {
 			return nil, "", fmt.Errorf("llmtier: provider ollama needs local models — set learn.cheap_model / learn.strong_model (e.g. qwen3)")
@@ -91,19 +125,43 @@ func Resolve(lc config.LearnConfig, ollamaEndpoint, stateDir string) (*Tier, str
 			llmgen.NewOllama(ollamaEndpoint, lc.StrongModel), false,
 			lc.CheapModel+"→"+lc.StrongModel+" via local Ollama")
 	case "auto", "":
-		if haveAPIKey {
+		if haveAnthropicKey {
 			if t, desc, err := anthropicPair(); err == nil {
+				return t, desc, nil
+			}
+		}
+		if haveOpenAIKey {
+			if t, desc, err := openAIPair(); err == nil {
 				return t, desc, nil
 			}
 		}
 		if t, desc, err := cliPair(); err == nil {
 			return t, desc, nil
 		}
-		return nil, "no learning backend — set ANTHROPIC_API_KEY, install the claude CLI, " +
-			"or set learn.provider: ollama with local models", nil
+		if t, desc, err := codexPair(); err == nil {
+			return t, desc, nil
+		}
+		return nil, "no learning backend — sign in to Codex/Claude CLI, set OPENAI_API_KEY/ANTHROPIC_API_KEY, " +
+			"or choose Ollama with local models", nil
 	default:
-		return nil, "", fmt.Errorf("llmtier: unknown learn provider %q (want auto|anthropic|claude-cli|ollama|none)", lc.Provider)
+		return nil, "", fmt.Errorf("llmtier: unknown learn provider %q (want auto|openai|codex-cli|anthropic|claude-cli|ollama|none)", lc.Provider)
 	}
+}
+
+func providerModels(lc config.LearnConfig, provider string) (string, string) {
+	cheap, strong := lc.CheapModel, lc.StrongModel
+	recCheap, recStrong := config.RecommendedLearnModels(provider)
+	openAIProvider := provider == "openai" || provider == "codex-cli"
+	claudeProvider := provider == "anthropic" || provider == "claude-cli"
+	if cheap == "" || (openAIProvider && strings.HasPrefix(cheap, "claude")) ||
+		(claudeProvider && strings.HasPrefix(cheap, "gpt-")) {
+		cheap = recCheap
+	}
+	if strong == "" || (openAIProvider && strings.HasPrefix(strong, "claude")) ||
+		(claudeProvider && strings.HasPrefix(strong, "gpt-")) {
+		strong = recStrong
+	}
+	return cheap, strong
 }
 
 // Generate runs one capped structured call on the chosen tier. Usage is
@@ -157,6 +215,11 @@ func isBackendUnavailable(err error) bool {
 		"/login",               // claude CLI, "Please run /login"
 		"invalid x-api-key",    // Anthropic API, bad key
 		"authentication_error", // Anthropic API error type
+		"incorrect api key",    // OpenAI API
+		"invalid_api_key",      // OpenAI API error code
+		"401 unauthorized",     // OpenAI API / Codex CLI
+		"codex login",          // Codex CLI, signed out
+		"login required",       // Codex CLI, signed out
 	} {
 		if strings.Contains(s, marker) {
 			return true

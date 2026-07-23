@@ -106,6 +106,8 @@ func TestGenerateSkipsBackendUnavailable(t *testing.T) {
 	cases := []string{
 		"running claude -p: exit status 1 (Not logged in · Please run /login)",
 		"anthropic: 401 authentication_error: invalid x-api-key",
+		"openai: 401 invalid_api_key: Incorrect API key provided",
+		"running codex exec: exit status 1 (login required; run codex login)",
 	}
 	for _, msg := range cases {
 		cheap := &fakeGen{name: "m", fail: true, failMsg: msg}
@@ -119,6 +121,19 @@ func TestGenerateSkipsBackendUnavailable(t *testing.T) {
 		}
 		if d := tier.ledger.Days[day(time.Now().UTC())]; d.Calls != 0 {
 			t.Errorf("%q: backend-unavailable call was recorded: %+v", msg, d)
+		}
+	}
+}
+
+func TestEstimateUSDOpenAIModels(t *testing.T) {
+	usage := llmgen.Usage{Prompt: 1_000_000, Completion: 1_000_000}
+	for model, want := range map[string]float64{
+		"gpt-5.6-luna (openai)":  7,
+		"gpt-5.6-terra (openai)": 17.5,
+		"gpt-5.6-sol (openai)":   35,
+	} {
+		if got := estimateUSD(model, usage); got != want {
+			t.Errorf("estimateUSD(%q) = %v, want %v", model, got, want)
 		}
 	}
 }
@@ -158,8 +173,12 @@ func TestResolveDisabledAndNone(t *testing.T) {
 
 func TestResolveExplicitErrors(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 	if _, _, err := Resolve(config.LearnConfig{Enabled: true, Provider: "anthropic"}, "", t.TempDir()); err == nil {
 		t.Error("anthropic without key should error")
+	}
+	if _, _, err := Resolve(config.LearnConfig{Enabled: true, Provider: "openai"}, "", t.TempDir()); err == nil {
+		t.Error("openai without key should error")
 	}
 	if _, _, err := Resolve(config.LearnConfig{
 		Enabled: true, Provider: "ollama", CheapModel: "claude-haiku-4-5", StrongModel: "qwen3",
@@ -173,6 +192,7 @@ func TestResolveExplicitErrors(t *testing.T) {
 
 func TestResolveAutoWithoutBackends(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
 	t.Setenv("PATH", t.TempDir()) // no claude binary
 	tier, desc, err := Resolve(config.LearnConfig{Enabled: true, Provider: "auto"}, "", t.TempDir())
 	if err != nil || tier != nil {
@@ -180,5 +200,18 @@ func TestResolveAutoWithoutBackends(t *testing.T) {
 	}
 	if desc == "" {
 		t.Error("want an options note")
+	}
+}
+
+func TestProviderModelsReplaceCrossVendorDefaults(t *testing.T) {
+	lc := config.LearnConfig{CheapModel: "claude-haiku-4-5", StrongModel: "claude-sonnet-5"}
+	cheap, strong := providerModels(lc, "openai")
+	if cheap != "gpt-5.6-luna" || strong != "gpt-5.6-terra" {
+		t.Fatalf("openai models = %q, %q", cheap, strong)
+	}
+	lc = config.LearnConfig{CheapModel: "gpt-5.6-terra", StrongModel: "gpt-5.6-sol"}
+	cheap, strong = providerModels(lc, "claude-cli")
+	if cheap != "claude-haiku-4-5" || strong != "claude-sonnet-5" {
+		t.Fatalf("claude models = %q, %q", cheap, strong)
 	}
 }
