@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+
+	"github.com/hung12ct/culi/internal/harness"
 )
 
 // Granularity levels, ordered: hook < summary < body. Session dedup is
@@ -60,8 +62,9 @@ func (s *Store) InjectedLevels(ctx context.Context, sessionID string) (map[strin
 
 // RecordInjections logs emitted cards for dedup + stats in one transaction.
 // cwd is the working directory at injection time, stored for repo attribution
-// in the review console ("" when unknown — e.g. a non-git prompt).
-func (s *Store) RecordInjections(ctx context.Context, sessionID, event, promptHash, cwd string, recs []InjectionRecord) error {
+// in the review console ("" when unknown — e.g. a non-git prompt). h attributes
+// the injection to its source agent for the console's harness filter.
+func (s *Store) RecordInjections(ctx context.Context, sessionID, event, promptHash, cwd string, h harness.Harness, recs []InjectionRecord) error {
 	if len(recs) == 0 {
 		return nil
 	}
@@ -71,14 +74,14 @@ func (s *Store) RecordInjections(ctx context.Context, sessionID, event, promptHa
 	}
 	defer tx.Rollback()
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO injections (session_id, event, card_id, granularity, prompt_hash, tokens, cwd)
-		VALUES (?,?,?,?,?,?,?)`)
+		INSERT INTO injections (session_id, event, card_id, granularity, prompt_hash, tokens, cwd, harness)
+		VALUES (?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return fmt.Errorf("store: preparing injection insert: %w", err)
 	}
 	defer stmt.Close()
 	for _, r := range recs {
-		if _, err := stmt.ExecContext(ctx, sessionID, event, r.CardID, r.Granularity, promptHash, r.Tokens, cwd); err != nil {
+		if _, err := stmt.ExecContext(ctx, sessionID, event, r.CardID, r.Granularity, promptHash, r.Tokens, cwd, h.String()); err != nil {
 			return fmt.Errorf("store: logging injection %s: %w", r.CardID, err)
 		}
 	}

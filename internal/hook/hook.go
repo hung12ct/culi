@@ -22,19 +22,20 @@ import (
 	"unicode/utf8"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/harness"
 )
 
 // Input is the normalized hook event. Claude Code's stdin JSON maps directly;
 // other harnesses become adapters onto this struct (ecosystem learning:
 // normalized event seam from day one).
 type Input struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	CWD            string `json:"cwd"`
-	Prompt         string `json:"prompt"`
-	HookEventName  string `json:"hook_event_name"`
-	Source         string `json:"source"` // SessionStart: startup|resume|clear|compact
-	Harness        string `json:"-"`      // adapter identity, not hook-provided JSON
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	CWD            string          `json:"cwd"`
+	Prompt         string          `json:"prompt"`
+	HookEventName  string          `json:"hook_event_name"`
+	Source         string          `json:"source"` // SessionStart: startup|resume|clear|compact
+	Harness        harness.Harness `json:"-"`      // adapter identity, not hook-provided JSON
 }
 
 // output is the Claude Code hook stdout contract.
@@ -78,14 +79,15 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 		return 0
 	}
 	event := args[0]
-	harness := "claude"
+	hn := harness.Default
 	for _, arg := range args[1:] {
 		if v, ok := strings.CutPrefix(arg, "--harness="); ok {
-			if v != "claude" && v != "codex" {
+			parsed, ok := harness.Parse(v)
+			if !ok {
 				logf(base, "hook: unknown harness %q", v)
 				return 0
 			}
-			harness = v
+			hn = parsed
 		}
 	}
 
@@ -117,11 +119,9 @@ func Run(args []string, in io.Reader, out io.Writer) (code int) {
 		logf(base, "hook %s: decoding stdin: %v", event, err)
 		return 0
 	}
-	input.Harness = harness
-	if input.SessionID != "" {
-		input.SessionID = harness + ":" + input.SessionID
-	}
-	if event == "session-end" && harness == "codex" {
+	input.Harness = hn
+	input.SessionID = hn.PrefixSession(input.SessionID)
+	if event == "session-end" && hn == harness.Codex {
 		deadline = sessionEndDeadline
 	}
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/knowledge"
 )
 
@@ -153,11 +154,11 @@ func TestPenalizeAbandonedPointers(t *testing.T) {
 		{CardID: "seen", Granularity: GranHook, Tokens: 10},
 		{CardID: "expanded", Granularity: GranHook, Tokens: 10},
 	}
-	if err := s.RecordInjections(ctx, "sess", "user-prompt-submit", "h", "", recs); err != nil {
+	if err := s.RecordInjections(ctx, "sess", "user-prompt-submit", "h", "", harness.Claude, recs); err != nil {
 		t.Fatal(err)
 	}
 	// "expanded" was later pulled at body granularity.
-	if err := s.RecordInjections(ctx, "sess", "mcp", "", "", []InjectionRecord{
+	if err := s.RecordInjections(ctx, "sess", "mcp", "", "", harness.Claude, []InjectionRecord{
 		{CardID: "expanded", Granularity: GranBody, Tokens: 100}}); err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/hung12ct/culi/internal/harness"
 )
 
 func TestInjectionAggsAndSessionCount(t *testing.T) {
@@ -13,10 +15,10 @@ func TestInjectionAggsAndSessionCount(t *testing.T) {
 		{CardID: "a", Granularity: GranBody, Tokens: 100},
 		{CardID: "b", Granularity: GranHook, Tokens: 15},
 	}
-	if err := s.RecordInjections(ctx, "s1", "user-prompt-submit", "h1", "", recs); err != nil {
+	if err := s.RecordInjections(ctx, "s1", "user-prompt-submit", "h1", "", harness.Claude, recs); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordInjections(ctx, "s2", "session-start", "", "", recs[:1]); err != nil {
+	if err := s.RecordInjections(ctx, "s2", "session-start", "", "", harness.Codex, recs[:1]); err != nil {
 		t.Fatal(err)
 	}
 

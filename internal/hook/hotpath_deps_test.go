@@ -20,7 +20,7 @@ import (
 func TestHotPathDependencyFirewall(t *testing.T) {
 	const prefix = "github.com/hung12ct/culi/internal/"
 	// Packages named by the CLAUDE.md §2 dependency contract that exist today.
-	hotPath := []string{"hook", "store", "knowledge", "retrieve", "pack", "embed"}
+	hotPath := []string{"hook", "store", "knowledge", "retrieve", "pack", "embed", "harness"}
 	// Heavy modules that must never reach the hot path. gopheragent is the one
 	// the contract calls out by name; the MCP and Anthropic SDKs are the other
 	// large trees that only belong in the pull server / learning pipeline.

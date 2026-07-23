@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/learn"
 	"github.com/hung12ct/culi/internal/learn/codexscan"
 	"github.com/hung12ct/culi/internal/learn/queue"
@@ -55,7 +56,7 @@ func Learn(args []string) error {
 		if *dryRun {
 			fmt.Printf("Codex sessions: %d\n", len(codexSessions))
 			for _, session := range codexSessions {
-				fmt.Printf("  codex:%s  %s  %s\n", session.SessionID,
+				fmt.Printf("  %s  %s  %s\n", harness.Codex.PrefixSession(session.SessionID),
 					session.UpdatedAt.Format(time.RFC3339), session.RolloutPath)
 			}
 			if codexSkipped > 0 {
@@ -76,8 +77,8 @@ func Learn(args []string) error {
 	if len(codexSessions) > 0 {
 		for _, session := range codexSessions {
 			job := queue.Job{
-				SessionID: "codex:" + session.SessionID, TranscriptPath: session.RolloutPath,
-				CWD: session.CWD, Source: "codex", Trigger: "session-end",
+				SessionID: harness.Codex.PrefixSession(session.SessionID), TranscriptPath: session.RolloutPath,
+				CWD: session.CWD, Source: harness.Codex, Trigger: "session-end",
 				EnqueuedAt: session.UpdatedAt.Format(time.RFC3339),
 			}
 			if err := queue.Enqueue(config.InboxDir(base), job); err != nil {

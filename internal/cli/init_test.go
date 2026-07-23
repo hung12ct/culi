@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/hung12ct/culi/internal/harness"
 )
 
 func TestRegisterHooksCodexShapeAndIdempotency(t *testing.T) {
@@ -78,7 +80,7 @@ func TestRegisterHooksCodexRepairsOldSessionEndTimeout(t *testing.T) {
 }
 
 func TestSelectHarnessesAndLegacyMCPJSON(t *testing.T) {
-	if got, err := selectHarnesses("all"); err != nil || strings.Join(got, ",") != "claude,codex" {
+	if got, err := selectHarnesses("all"); err != nil || len(got) != 2 || got[0] != harness.Claude || got[1] != harness.Codex {
 		t.Fatalf("all=%v err=%v", got, err)
 	}
 	if _, err := selectHarnesses("wat"); err == nil {

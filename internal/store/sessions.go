@@ -16,6 +16,7 @@ type InjectionRow struct {
 	Granularity string
 	Tokens      int
 	Cwd         string
+	Harness     string // source agent: claude | codex
 }
 
 // RecentInjections returns injection-log rows newest first, capped at limit.
@@ -26,7 +27,7 @@ func (s *Store) RecentInjections(ctx context.Context, limit int) ([]InjectionRow
 		limit = 500
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT session_id, ts, event, card_id, granularity, tokens, cwd
+		SELECT session_id, ts, event, card_id, granularity, tokens, cwd, harness
 		FROM injections ORDER BY ts DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: reading recent injections: %w", err)
@@ -35,7 +36,7 @@ func (s *Store) RecentInjections(ctx context.Context, limit int) ([]InjectionRow
 	var out []InjectionRow
 	for rows.Next() {
 		var r InjectionRow
-		if err := rows.Scan(&r.SessionID, &r.TS, &r.Event, &r.CardID, &r.Granularity, &r.Tokens, &r.Cwd); err != nil {
+		if err := rows.Scan(&r.SessionID, &r.TS, &r.Event, &r.CardID, &r.Granularity, &r.Tokens, &r.Cwd, &r.Harness); err != nil {
 			return nil, fmt.Errorf("store: scanning injection row: %w", err)
 		}
 		out = append(out, r)

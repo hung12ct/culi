@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/harness"
 )
 
 // Doctor reports locally verifiable harness wiring. Codex does not expose its
@@ -18,11 +19,11 @@ import (
 // than presenting "configured" as "trusted".
 func Doctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	harness := fs.String("harness", "codex", "harness to inspect: codex")
+	harnessFlag := fs.String("harness", harness.Codex.String(), "harness to inspect: codex")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
 	}
-	if *harness != "codex" {
+	if *harnessFlag != harness.Codex.String() {
 		return fmt.Errorf("cli: doctor currently supports --harness=codex")
 	}
 	return doctorCodex(os.Stdout)
@@ -81,10 +82,10 @@ func pendingCodexJobs(dir string) int {
 			continue
 		}
 		var job struct {
-			Source         string `json:"source"`
-			TranscriptPath string `json:"transcript_path"`
+			Source         harness.Harness `json:"source"`
+			TranscriptPath string          `json:"transcript_path"`
 		}
-		if json.Unmarshal(raw, &job) == nil && job.Source == "codex" && job.TranscriptPath != "" {
+		if json.Unmarshal(raw, &job) == nil && job.Source == harness.Codex && job.TranscriptPath != "" {
 			n++
 		}
 	}
@@ -163,7 +164,7 @@ func lastCodexHook(path string) string {
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
 		line := sc.Text()
-		if strings.Contains(line, "session=codex:") {
+		if strings.Contains(line, "session="+harness.Codex.String()+":") {
 			last = line
 		}
 	}

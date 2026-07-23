@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/hung12ct/culi/internal/harness"
 )
 
 func writeJob(t *testing.T, dir, name, transcript string) string {
@@ -73,7 +75,7 @@ func TestEnqueueStableAndReadable(t *testing.T) {
 	dir := t.TempDir()
 	job := Job{
 		SessionID: "codex:s1", TranscriptPath: "/tmp/codex.jsonl", CWD: "/repo",
-		Source: "codex", Trigger: "session-end", EnqueuedAt: "2026-07-23T00:00:00Z",
+		Source: harness.Codex, Trigger: "session-end", EnqueuedAt: "2026-07-23T00:00:00Z",
 	}
 	if err := Enqueue(dir, job); err != nil {
 		t.Fatal(err)
@@ -85,7 +87,7 @@ func TestEnqueueStableAndReadable(t *testing.T) {
 	if err != nil || len(jobs) != 1 {
 		t.Fatalf("jobs=%+v err=%v", jobs, err)
 	}
-	if jobs[0].SessionID != "codex:s1" || jobs[0].EffectiveSource() != "codex" || !jobs[0].IsFinal() {
+	if jobs[0].SessionID != "codex:s1" || jobs[0].EffectiveSource() != harness.Codex || !jobs[0].IsFinal() {
 		t.Fatalf("job=%+v", jobs[0])
 	}
 }
@@ -185,11 +187,11 @@ func TestShouldMine(t *testing.T) {
 
 func TestLegacyJobDefaults(t *testing.T) {
 	j := Job{}
-	if j.EffectiveSource() != "claude" || !j.IsFinal() {
+	if j.EffectiveSource() != harness.Claude || !j.IsFinal() {
 		t.Fatalf("legacy defaults: source=%q final=%v", j.EffectiveSource(), j.IsFinal())
 	}
-	j = Job{Source: "codex", Trigger: "stop"}
-	if j.EffectiveSource() != "codex" || j.IsFinal() {
+	j = Job{Source: harness.Codex, Trigger: "stop"}
+	if j.EffectiveSource() != harness.Codex || j.IsFinal() {
 		t.Fatalf("codex stop: source=%q final=%v", j.EffectiveSource(), j.IsFinal())
 	}
 }

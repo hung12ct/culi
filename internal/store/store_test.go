@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/knowledge"
 )
 
@@ -101,7 +102,7 @@ func TestInjectionDedupMonotonic(t *testing.T) {
 	s := openTest(t)
 	sess := "sess-1"
 
-	err := s.RecordInjections(ctx, sess, "user-prompt-submit", "h1", "/repo/x", []InjectionRecord{
+	err := s.RecordInjections(ctx, sess, "user-prompt-submit", "h1", "/repo/x", harness.Claude, []InjectionRecord{
 		{CardID: "a", Granularity: GranHook, Tokens: 15},
 		{CardID: "b", Granularity: GranBody, Tokens: 300},
 	})
@@ -117,7 +118,7 @@ func TestInjectionDedupMonotonic(t *testing.T) {
 	}
 
 	// Upgrade a to summary; highest level wins.
-	if err := s.RecordInjections(ctx, sess, "user-prompt-submit", "h2", "/repo/x", []InjectionRecord{
+	if err := s.RecordInjections(ctx, sess, "user-prompt-submit", "h2", "/repo/x", harness.Claude, []InjectionRecord{
 		{CardID: "a", Granularity: GranSummary, Tokens: 60},
 	}); err != nil {
 		t.Fatalf("record 2: %v", err)

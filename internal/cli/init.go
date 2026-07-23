@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/store"
 )
 
@@ -23,11 +24,11 @@ import (
 func Init(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	noHooks := fs.Bool("no-hooks", false, "skip registering lifecycle hooks (MCP is still registered)")
-	harness := fs.String("harness", "auto", "harness to configure: auto|claude|codex|all")
+	harnessFlag := fs.String("harness", "auto", "harness to configure: auto|claude|codex|all")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
 	}
-	harnesses, err := selectHarnesses(*harness)
+	harnesses, err := selectHarnesses(*harnessFlag)
 	if err != nil {
 		return err
 	}
@@ -135,9 +136,9 @@ ollama:
 		} else {
 			var changed bool
 			switch h {
-			case "claude":
+			case harness.Claude:
 				changed, err = registerHooksClaude()
-			case "codex":
+			case harness.Codex:
 				changed, err = registerHooksCodex()
 			}
 			if err != nil {
@@ -150,9 +151,9 @@ ollama:
 			}
 		}
 		switch h {
-		case "claude":
+		case harness.Claude:
 			registerMCPClaude()
-		case "codex":
+		case harness.Codex:
 			registerMCPCodex()
 		}
 	}
@@ -160,22 +161,25 @@ ollama:
 	return nil
 }
 
-func selectHarnesses(v string) ([]string, error) {
+// selectHarnesses maps the --harness flag to the harnesses to configure. The
+// "auto"/"all" values are CLI-only sugar (not harness members): auto detects
+// installed harnesses, all returns every known one.
+func selectHarnesses(v string) ([]harness.Harness, error) {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "claude":
-		return []string{"claude"}, nil
+		return []harness.Harness{harness.Claude}, nil
 	case "codex":
-		return []string{"codex"}, nil
+		return []harness.Harness{harness.Codex}, nil
 	case "all":
-		return []string{"claude", "codex"}, nil
+		return append([]harness.Harness(nil), harness.All...), nil
 	case "auto":
-		var out []string
+		var out []harness.Harness
 		home, _ := os.UserHomeDir()
 		if _, err := exec.LookPath("claude"); err == nil || dirExists(filepath.Join(home, ".claude")) {
-			out = append(out, "claude")
+			out = append(out, harness.Claude)
 		}
 		if _, err := exec.LookPath("codex"); err == nil || dirExists(codexHome()) {
-			out = append(out, "codex")
+			out = append(out, harness.Codex)
 		}
 		return out, nil
 	default:
@@ -431,7 +435,7 @@ func registerHooksCodex() (changed bool, err error) {
 		if hasCuliHook(hooks[ev.name]) {
 			continue
 		}
-		cmd := joinCommand(exe, "hook", ev.event, "--harness=codex")
+		cmd := joinCommand(exe, "hook", ev.event, "--harness="+harness.Codex.String())
 		entry := map[string]any{"type": "command", "command": cmd, "timeout": ev.timeout}
 		group := map[string]any{"hooks": []any{entry}}
 		list, _ := hooks[ev.name].([]any)

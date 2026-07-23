@@ -11,6 +11,7 @@ import (
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/embed"
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/learn/queue"
@@ -88,7 +89,7 @@ func handlePrompt(ctx context.Context, base string, in Input) (string, error) {
 	if len(inj.Items) == 0 {
 		return "", nil
 	}
-	if err := s.RecordInjections(ctx, in.SessionID, "user-prompt-submit", promptHash(in.Prompt), in.CWD, inj.Records()); err != nil {
+	if err := s.RecordInjections(ctx, in.SessionID, "user-prompt-submit", promptHash(in.Prompt), in.CWD, in.Harness, inj.Records()); err != nil {
 		return "", err
 	}
 	return inj.Render(), nil
@@ -160,7 +161,7 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 		lifecycleLog(base, in, "session-start", "ok source="+eventSource(in.Source))
 		return coverageNote(ctx, s, sc), nil
 	}
-	if err := s.RecordInjections(ctx, in.SessionID, "session-start", "", in.CWD, inj.Records()); err != nil {
+	if err := s.RecordInjections(ctx, in.SessionID, "session-start", "", in.CWD, in.Harness, inj.Records()); err != nil {
 		return "", err
 	}
 	lifecycleLog(base, in, "session-start", "ok source="+eventSource(in.Source))
@@ -232,12 +233,12 @@ func enqueueTranscript(base string, in Input, trigger string) error {
 // quieter behavior for compatibility; its lifecycle can be added later with
 // the same explicit harness prefix.
 func lifecycleLog(base string, in Input, event, result string) {
-	if in.Harness != "codex" {
+	if in.Harness != harness.Codex {
 		return
 	}
 	session := in.SessionID
 	if session == "" {
-		session = "codex:<missing>"
+		session = harness.Codex.PrefixSession("<missing>")
 	}
 	logf(base, "hook %s %s session=%s", event, result, session)
 }

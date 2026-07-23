@@ -17,6 +17,7 @@ import (
 
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/embed"
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/learn/codexroll"
 	"github.com/hung12ct/culi/internal/learn/llmtier"
@@ -74,9 +75,9 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 	var newOff int64
 	var err error
 	switch job.EffectiveSource() {
-	case "claude":
+	case harness.Claude:
 		entries, newOff, err = transcript.ReadFrom(job.TranscriptPath, cur.Offset)
-	case "codex":
+	case harness.Codex:
 		entries, newOff, err = codexroll.ReadFrom(job.TranscriptPath, cur.Offset)
 	default:
 		return Result{}, cur, fmt.Errorf("mine: unknown transcript source %q", job.Source)

@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hung12ct/culi/internal/harness"
 )
 
 // maxAttempts is the fail-ladder ceiling before a job is parked in failed/.
@@ -23,12 +25,12 @@ const maxAttempts = 3
 
 // Job is one queued transcript, as enqueued by the SessionEnd hook.
 type Job struct {
-	SessionID      string `json:"session_id"`
-	TranscriptPath string `json:"transcript_path"`
-	CWD            string `json:"cwd"`
-	Source         string `json:"source,omitempty"`
-	Trigger        string `json:"trigger,omitempty"`
-	EnqueuedAt     string `json:"enqueued_at"`
+	SessionID      string          `json:"session_id"`
+	TranscriptPath string          `json:"transcript_path"`
+	CWD            string          `json:"cwd"`
+	Source         harness.Harness `json:"source,omitempty"`
+	Trigger        string          `json:"trigger,omitempty"`
+	EnqueuedAt     string          `json:"enqueued_at"`
 
 	path     string // job file on disk
 	attempts int    // prior failed attempts, parsed from the .fN suffix
@@ -51,7 +53,7 @@ func Enqueue(inboxDir string, job Job) error {
 	if err != nil {
 		return fmt.Errorf("queue: marshaling job: %w", err)
 	}
-	key := job.EffectiveSource() + job.SessionID + job.TranscriptPath
+	key := job.EffectiveSource().String() + job.SessionID + job.TranscriptPath
 	sum := sha256.Sum256([]byte(key))
 	path := filepath.Join(inboxDir, hex.EncodeToString(sum[:8])+".json")
 	tmp, err := os.CreateTemp(inboxDir, ".job-*.tmp")
@@ -81,9 +83,9 @@ func Enqueue(inboxDir string, job Job) error {
 func (j Job) Path() string  { return j.path }
 func (j Job) Attempts() int { return j.attempts }
 
-func (j Job) EffectiveSource() string {
+func (j Job) EffectiveSource() harness.Harness {
 	if j.Source == "" {
-		return "claude"
+		return harness.Default
 	}
 	return j.Source
 }

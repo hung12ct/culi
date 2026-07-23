@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/store"
 )
@@ -37,7 +38,7 @@ func TestStatuslineText(t *testing.T) {
 	if _, err := indexer.Sync(ctx, s, kdir); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecordInjections(ctx, "sess-x", "user-prompt-submit", "h", "",
+	if err := s.RecordInjections(ctx, "sess-x", "user-prompt-submit", "h", "", harness.Claude,
 		[]store.InjectionRecord{{CardID: "rules/a", Granularity: store.GranBody, Tokens: 42}}); err != nil {
 		t.Fatal(err)
 	}

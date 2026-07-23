@@ -18,7 +18,9 @@ import (
 //
 // v2: injections gained a `cwd` column so the review console can show which
 // repo each injection happened in.
-const schemaVersion = 2
+// v3: injections gained a `harness` column so attribution (claude vs codex) is
+// authoritative rather than parsed out of the session_id prefix.
+const schemaVersion = 3
 
 // Store wraps the SQLite handle. Safe for concurrent use (database/sql pools;
 // WAL allows one writer + many readers).
@@ -142,7 +144,8 @@ CREATE TABLE injections (
   granularity TEXT NOT NULL,             -- hook | summary | body
   prompt_hash TEXT NOT NULL DEFAULT '',
   tokens      INTEGER NOT NULL,
-  cwd         TEXT NOT NULL DEFAULT ''   -- working dir at injection time (repo attribution)
+  cwd         TEXT NOT NULL DEFAULT '',  -- working dir at injection time (repo attribution)
+  harness     TEXT NOT NULL DEFAULT 'claude'  -- source agent: claude | codex
 );
 CREATE INDEX idx_inj_session ON injections(session_id, card_id);
 
