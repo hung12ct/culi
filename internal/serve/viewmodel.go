@@ -124,6 +124,13 @@ type usageTile struct {
 	Value string `json:"value"`
 	Color string `json:"color"`
 }
+
+// effView is the card-detail effectiveness verdict: the bucket plus a
+// one-line explanation of what earned it (shown as a tooltip).
+type effView struct {
+	Bucket string `json:"bucket"`
+	Note   string `json:"note"`
+}
 type cardDetailPayload struct {
 	ID          string      `json:"id"`
 	Type        string      `json:"type"`
@@ -138,6 +145,7 @@ type cardDetailPayload struct {
 	Model       string      `json:"model"`
 	Hash        string      `json:"hash"`
 	Usage       []usageTile `json:"usage"`
+	Eff         *effView    `json:"eff"`
 	Triggers    []string    `json:"triggers"`
 	Keywords    []string    `json:"keywords"` // trigger keywords only, for the edit form
 	Editable    bool        `json:"editable"` // culi-authored → safe to rewrite via the console
@@ -434,6 +442,9 @@ func (s *server) buildCards(ctx context.Context) []cardListItem {
 	metas, _ := s.store.AllCardsMeta(ctx)
 	stats, _ := s.store.AllCardStats(ctx, time.Now())
 	injected, _ := s.store.InjectedCardIDs(ctx)
+	// Injection counts come from the log, not the never-written stats counter
+	// (see store.WindowUsage) — the counter alone rendered every card as 0.
+	usage, _ := s.store.CardWindowUsage(ctx)
 	out := make([]cardListItem, 0, len(metas))
 	for _, m := range metas {
 		triggers := append([]string{}, m.Triggers.Keywords...)
@@ -445,7 +456,7 @@ func (s *server) buildCards(ctx context.Context) []cardListItem {
 			Status:      normStatus(m.Status),
 			ScopeLabels: m.Scopes,
 			Baseline:    m.Baseline,
-			Injected:    round(stats[m.ID].Injected),
+			Injected:    max(round(stats[m.ID].Injected), usage[m.ID].Injections),
 			Spark:       nil, // no per-card time series in the index; sparkline omitted
 			Key:         m.Key,
 			Summary:     m.Summary,
@@ -468,6 +479,7 @@ func (s *server) buildCardDetail(ctx context.Context, id string) (cardDetailPayl
 	}
 	stats, _ := s.store.AllCardStats(ctx, time.Now())
 	cs := stats[sc.ID]
+	windowUsage, _ := s.store.CardWindowUsage(ctx)
 	src, model := provenanceOf(card)
 	merged, hash := "—", "—"
 	if card.Provenance != nil {
@@ -496,11 +508,12 @@ func (s *server) buildCardDetail(ctx context.Context, id string) (cardDetailPayl
 		Model:       model,
 		Hash:        hash,
 		Usage: []usageTile{
-			{Label: "injected", Value: itoa(round(cs.Injected)), Color: "var(--metric-success)"},
+			{Label: "injected", Value: itoa(max(round(cs.Injected), windowUsage[sc.ID].Injections)), Color: "var(--metric-success)"},
 			{Label: "expanded", Value: itoa(round(cs.Expanded)), Color: "var(--metric-blue)"},
 			{Label: "referenced", Value: itoa(round(cs.Referenced)), Color: "var(--metric-violet)"},
 			{Label: "downvoted", Value: itoa(round(cs.Downvoted)), Color: "var(--metric-danger)"},
 		},
+		Eff:      effVerdict(cs, windowUsage[sc.ID]),
 		Triggers: triggers,
 		Keywords: card.Triggers.Keywords,
 		Editable: culiEditable(card),
@@ -820,6 +833,20 @@ func (s *server) ollamaBackendStatus(ctx context.Context, endpoint string) (bool
 }
 
 // ---------- helpers ----------
+
+// effVerdict maps a card's classification to the detail-pane badge. Notes
+// state the evidence, and — for the negative-leaning buckets — the caveat
+// that pushed bodies can help without observable signal.
+func effVerdict(cs store.CardStats, usage store.WindowUsage) *effView {
+	e := store.ClassifyEffectiveness(cs, usage)
+	notes := map[string]string{
+		store.EffHelpful:   "Pulled or referenced after injection — this card earns its tokens.",
+		store.EffNoisy:     "Downvoted or repeatedly ignored as a pointer. Consider retiring or tightening its triggers.",
+		store.EffExpensive: "High token spend with no observed pull. Full-card pushes can still help invisibly — judge with the body granularity in mind.",
+		store.EffUncertain: "Not enough observations to judge yet.",
+	}
+	return &effView{Bucket: e.Bucket, Note: notes[e.Bucket]}
+}
 
 func itoa(n int) string { return strconv.Itoa(n) }
 func round(f float64) int {

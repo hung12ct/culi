@@ -84,18 +84,37 @@ type counterfactual struct {
 }
 
 type cardsReport struct {
-	ByType           map[string]int `json:"by_type"`
-	Candidates       int            `json:"candidates"`
-	Retired          int            `json:"retired"`
-	CorpusBodyTokens int            `json:"corpus_body_tokens"`
-	TopPulled        []cardScore    `json:"top_pulled,omitempty"`
-	Noisy            []cardScore    `json:"noisy,omitempty"`
-	Stale            []string       `json:"stale,omitempty"`
+	ByType           map[string]int       `json:"by_type"`
+	Candidates       int                  `json:"candidates"`
+	Retired          int                  `json:"retired"`
+	CorpusBodyTokens int                  `json:"corpus_body_tokens"`
+	TopPulled        []cardScore          `json:"top_pulled,omitempty"`
+	Noisy            []cardScore          `json:"noisy,omitempty"`
+	Stale            []string             `json:"stale,omitempty"`
+	Effectiveness    *effectivenessReport `json:"effectiveness,omitempty"`
 }
 
 type cardScore struct {
 	ID    string  `json:"id"`
 	Score float64 `json:"score"`
+}
+
+// effectivenessReport buckets every live card by store.ClassifyEffectiveness:
+// decayed lifetime feedback counters plus token cost in the injection-log
+// retention window. Uncertain is a count, not a list — most of a healthy
+// corpus sits there (full-body pushes are unobservable, so silence is not
+// evidence of uselessness).
+type effectivenessReport struct {
+	Helpful   []effCard `json:"helpful,omitempty"`
+	Noisy     []effCard `json:"noisy,omitempty"`
+	Expensive []effCard `json:"expensive,omitempty"`
+	Uncertain int       `json:"uncertain"`
+}
+
+type effCard struct {
+	ID           string  `json:"id"`
+	PullRate     float64 `json:"pull_rate"`
+	WindowTokens int     `json:"window_tokens"`
 }
 
 type learningReport struct {
@@ -183,9 +202,49 @@ func gatherCards(ctx context.Context, s *store.Store) cardsReport {
 	if err == nil {
 		r.TopPulled = topScores(stats, func(cs store.CardStats) float64 { return 3*cs.Expanded + 5*cs.Referenced })
 		r.Noisy = topScores(stats, func(cs store.CardStats) float64 { return cs.Downvoted })
+		r.Effectiveness = gatherEffectiveness(ctx, s, cards, stats)
 	}
 	r.Stale = staleCards(ctx, s, cards, stats)
 	return r
+}
+
+// gatherEffectiveness classifies every live card. Missing stats rows classify
+// from the zero value (→ uncertain), so the buckets always cover the corpus.
+func gatherEffectiveness(ctx context.Context, s *store.Store, cards []store.StoredCard, stats map[string]store.CardStats) *effectivenessReport {
+	usage, err := s.CardWindowUsage(ctx)
+	if err != nil {
+		usage = map[string]store.WindowUsage{}
+	}
+	rep := &effectivenessReport{}
+	for _, c := range cards {
+		if c.Status == "candidate" || c.Status == "retired" {
+			continue
+		}
+		e := store.ClassifyEffectiveness(stats[c.ID], usage[c.ID])
+		row := effCard{ID: c.ID, PullRate: e.PullRate, WindowTokens: usage[c.ID].Tokens}
+		switch e.Bucket {
+		case store.EffHelpful:
+			rep.Helpful = append(rep.Helpful, row)
+		case store.EffNoisy:
+			rep.Noisy = append(rep.Noisy, row)
+		case store.EffExpensive:
+			rep.Expensive = append(rep.Expensive, row)
+		default:
+			rep.Uncertain++
+		}
+	}
+	byPullThenTokens := func(rows []effCard) {
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].PullRate != rows[j].PullRate {
+				return rows[i].PullRate > rows[j].PullRate
+			}
+			return rows[i].WindowTokens > rows[j].WindowTokens
+		})
+	}
+	byPullThenTokens(rep.Helpful)
+	byPullThenTokens(rep.Noisy)
+	sort.Slice(rep.Expensive, func(i, j int) bool { return rep.Expensive[i].WindowTokens > rep.Expensive[j].WindowTokens })
+	return rep
 }
 
 func topScores(stats map[string]store.CardStats, score func(store.CardStats) float64) []cardScore {
@@ -301,6 +360,10 @@ func renderText(rep report) {
 	fmt.Println()
 	printScores("top pulled", c.TopPulled)
 	printScores("noisy", c.Noisy)
+	if e := c.Effectiveness; e != nil {
+		fmt.Printf("  effectiveness      %d helpful · %d noisy · %d expensive · %d uncertain (see --json for per-card verdicts)\n",
+			len(e.Helpful), len(e.Noisy), len(e.Expensive), e.Uncertain)
+	}
 	if len(c.Stale) > 0 {
 		shown := c.Stale
 		if len(shown) > 5 {

@@ -60,6 +60,19 @@ function scopeChip(label, lg) {
 function scopeChips(labels, lg) { return (labels || []).map(l => scopeChip(l, lg)).join(''); }
 function fmtCount(n) { return Number(n || 0).toLocaleString(); }
 
+// Effectiveness verdict badges — buckets computed server-side from decayed
+// feedback counters + 7d token cost (see store.ClassifyEffectiveness).
+const EFF = {
+  helpful:   ['Helpful',   COLOR.success],
+  noisy:     ['Noisy',     COLOR.danger],
+  expensive: ['Expensive', COLOR.warning],
+  uncertain: ['Uncertain', COLOR.neutral],
+};
+function effBadge(bucket, note) {
+  const [label, color] = EFF[bucket] || EFF.uncertain;
+  return `<span class="eff-badge" style="background:${alpha(color, 0.14)};color:${color};"${note ? ` title="${esc(note)}"` : ''}>${label}</span>`;
+}
+
 // destrBtn renders a destructive button that arms on first click. When its act
 // is the one awaiting confirmation, it flips to a pulsing red "Confirm?" —
 // an inline two-step guard instead of a modal (keeps the design's fast feel).
@@ -542,12 +555,18 @@ function screenKnowledgeAnalytics() {
     const title = c.available
       ? `<button class="pulse-table-link" data-act="analyticsCard:${esc(c.short)}">${esc(c.title)}</button><span class="mono pulse-id">${esc(c.id)}</span>`
       : `<span class="pulse-table-link unavailable">${esc(c.title)}</span><span class="pulse-removed">removed</span>`;
+    const verdict = c.bucket
+      ? `${effBadge(c.bucket, c.pullRate ? `pull rate ${c.pullRate} — expansions + references per injection` : '')}${c.pullRate ? `<span class="eff-rate mono">${esc(c.pullRate)}</span>` : ''}`
+      : '—';
     return `<tr>
       <td class="mono pulse-table-rank">${i + 1}</td><td>${title}</td>
       <td class="pulse-table-num">${fmtCount(c.sessions)}</td><td class="pulse-table-num">${fmtCount(c.deliveries)}</td>
-      <td class="pulse-table-num">${fmtCount(c.tokens)}</td><td class="pulse-agents">${agentSplit || '—'}</td><td>${esc(c.lastUsed || '—')}</td>
+      <td class="pulse-table-num">${fmtCount(c.tokens)}</td><td class="pulse-verdict">${verdict}</td>
+      <td class="pulse-agents">${agentSplit || '—'}</td><td>${esc(c.lastUsed || '—')}</td>
     </tr>`;
   }).join('');
+  const verdicts = ['helpful', 'noisy', 'expensive', 'uncertain']
+    .map(b => `<span class="pulse-verdict-item">${effBadge(b)}<b>${fmtCount(summary[b])}</b></span>`).join('');
   const content = `<div class="pulse-kpis">
       <div><span>Cards used</span><b>${fmtCount(summary.activeCards)}</b></div>
       <div><span>Sessions</span><b>${fmtCount(summary.sessions)}</b></div>
@@ -555,13 +574,16 @@ function screenKnowledgeAnalytics() {
       <div><span>Tokens delivered</span><b>${fmtCount(summary.tokens)}</b></div>
       <div><span>Cross-agent cards</span><b>${fmtCount(summary.crossHarnessCards)}</b></div>
     </div>
+    <div class="pulse-verdicts" title="Verdicts combine lifetime pull/downvote signals with 7-day token cost; they don't change with the filters above. A full card pushed into the prompt can help without being expanded — silence alone never marks a card noisy.">
+      <span class="pulse-verdicts-label">Card verdicts</span>${verdicts}
+    </div>
     <section class="pulse-detail-card card">
       <div class="pulse-section-head"><div><h3>Most useful cards</h3><p>Distinct sessions are the strongest signal; repeated deliveries in one session do not inflate the ranking.</p></div><span>${esc((a && a.range) || 'Last 7 days')}</span></div>
       ${analyticsChart(a, 10)}
     </section>
     <section class="pulse-table-card card">
       <div class="pulse-section-head"><div><h3>Card activity</h3><p>Up to 20 cards in the current agent and repository view.</p></div></div>
-      ${rows ? `<div class="pulse-table-wrap"><table class="pulse-table"><thead><tr><th>#</th><th>Card</th><th>Sessions</th><th>Deliveries</th><th>Tokens</th><th>Agent split</th><th>Last used</th></tr></thead><tbody>${rows}</tbody></table></div>` : analyticsChart(a, 20)}
+      ${rows ? `<div class="pulse-table-wrap"><table class="pulse-table"><thead><tr><th>#</th><th>Card</th><th>Sessions</th><th>Deliveries</th><th>Tokens</th><th>Verdict</th><th>Agent split</th><th>Last used</th></tr></thead><tbody>${rows}</tbody></table></div>` : analyticsChart(a, 20)}
     </section>`;
   return `<div class="pulse-page">
     <div class="pulse-page-head"><div><div class="pulse-eyebrow">Knowledge Pulse</div><h2>What Culi is using</h2><p>Real delivery activity across Claude Code and Codex. Filters are shared with Home.</p></div>${analyticsFilters(a)}</div>
@@ -661,6 +683,7 @@ function kbDetail(filtered) {
     <div class="kb-d-head">
       <span class="type-pill">${typeIcon(c.type)} ${esc(c.type)}</span>
       <span class="status-badge status-${c.status}">${statusLabel}</span>${base}
+      ${c.eff ? effBadge(c.eff.bucket, c.eff.note) : ''}
       <span class="spacer"></span><span class="cand-id">${esc(c.id)}</span>
     </div>
     <h2 class="kb-d-title ${retired ? 'retired' : ''}">${esc(c.title)}</h2>

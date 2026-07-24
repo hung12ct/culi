@@ -72,6 +72,24 @@ Pulse aggregates by card and supports:
 Removed cards remain visible in historical analytics but are clearly marked unavailable. This keeps
 past delivery accounting honest without pretending the card still exists.
 
+### Card effectiveness verdicts
+
+Pulse also assigns each card a verdict combining its lifetime feedback counters (time-decayed
+expansions, references, downvotes — the same signals that tune retrieval ranking) with its
+seven-day token cost:
+
+- **Helpful** — pulled via `expand_card` or referenced by a saved lesson after injection;
+- **Noisy** — explicitly downvoted, or repeatedly injected as a pointer and never opened;
+- **Expensive** — heavy token spend with no observed positive signal;
+- **Uncertain** — too few observations to judge (most of a healthy corpus sits here).
+
+Verdicts are computed from unfiltered data, so they stay stable while you switch agent or
+repository filters. One deliberate asymmetry: a full card body pushed into the prompt can help the
+agent without ever being expanded, so silence alone never marks a card noisy — only pointer-level
+injections earn negative inference. The same buckets are available machine-readably under
+`cards.effectiveness` in `culi stats --json`, and each card's detail page shows its verdict with an
+explanation.
+
 ## Activity
 
 Activity shows exactly what Culi delivered and learned per conversation. Session IDs retain harness

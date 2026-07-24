@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,6 +31,10 @@ type analyticsSummary struct {
 	Deliveries        int `json:"deliveries"`
 	Tokens            int `json:"tokens"`
 	CrossHarnessCards int `json:"crossHarnessCards"`
+	Helpful           int `json:"helpful"`
+	Noisy             int `json:"noisy"`
+	Expensive         int `json:"expensive"`
+	Uncertain         int `json:"uncertain"`
 }
 
 type analyticsHarness struct {
@@ -54,6 +59,8 @@ type analyticsCard struct {
 	LastUsed    string             `json:"lastUsed"`
 	Harnesses   []analyticsHarness `json:"harnesses"`
 	Repos       []string           `json:"repos"`
+	Bucket      string             `json:"bucket"`   // effectiveness verdict (store.Eff*)
+	PullRate    string             `json:"pullRate"` // pulls per injection, formatted ("" when no injections)
 
 	lastUsedRaw string
 }
@@ -127,6 +134,13 @@ func (s *server) buildAnalytics(ctx context.Context, filter analyticsFilter) (an
 	for _, card := range meta {
 		metaByID[card.ID] = card
 	}
+
+	// Effectiveness inputs are deliberately unfiltered (lifetime decayed
+	// counters + full-window usage): a card's verdict must not flip when the
+	// harness/repo filter changes. Both best-effort — a missing map classifies
+	// everything from zero values ("uncertain") instead of failing the view.
+	cardStats, _ := s.store.AllCardStats(ctx, time.Now().UTC())
+	windowUsage, _ := s.store.CardWindowUsage(ctx)
 
 	// Options describe the complete window, not only the currently filtered
 	// result, so changing one filter never makes the other options disappear.
@@ -215,6 +229,21 @@ func (s *server) buildAnalytics(ctx context.Context, filter analyticsFilter) (an
 			Tokens:      a.tokens,
 			LastUsed:    humanizeTime(a.lastUsed),
 			lastUsedRaw: a.lastUsed,
+		}
+		eff := store.ClassifyEffectiveness(cardStats[id], windowUsage[id])
+		card.Bucket = eff.Bucket
+		if eff.PullRate > 0 {
+			card.PullRate = fmt.Sprintf("%.0f%%", 100*eff.PullRate)
+		}
+		switch eff.Bucket {
+		case store.EffHelpful:
+			payload.Summary.Helpful++
+		case store.EffNoisy:
+			payload.Summary.Noisy++
+		case store.EffExpensive:
+			payload.Summary.Expensive++
+		default:
+			payload.Summary.Uncertain++
 		}
 		if m, ok := metaByID[id]; ok {
 			card.Short = m.ShortID

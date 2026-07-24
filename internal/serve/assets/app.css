@@ -1227,6 +1227,14 @@ html[data-theme="dark"] .repo-row:hover { background: #252d3a; }
 .pulse-agent-dot { display: inline-block; width: 7px; height: 7px; margin: 0 5px 0 0; border-radius: 50%; }
 .pulse-split { padding: 0 7px; color: var(--faint); }
 
+/* Effectiveness verdicts — badge colors are inlined from COLOR via alpha(). */
+.eff-badge { display: inline-block; padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.eff-rate { margin-left: 7px; color: var(--faint); font-size: 10.5px; }
+.pulse-verdicts { display: flex; align-items: center; gap: 14px; max-width: 1180px; margin: 0 auto 14px; padding: 10px 16px; border: 1px solid #e1e5ec; border-radius: 11px; background: var(--panel); cursor: help; }
+.pulse-verdicts-label { color: var(--faint); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .055em; }
+.pulse-verdict-item { display: inline-flex; align-items: center; gap: 7px; }
+.pulse-verdict-item b { color: var(--tx); font-size: 14px; font-variant-numeric: tabular-nums; }
+
 html[data-theme="dark"] .pulse-eyebrow { color: #91a3fb; }
 html[data-theme="dark"] .pulse-filter-group { background: #171d27; border-color: #303a49; }
 html[data-theme="dark"] .pulse-filter { color: #9aa5b6; }
@@ -1238,7 +1246,7 @@ html[data-theme="dark"] .pulse-bar-track { background: #2a3341; }
 html[data-theme="dark"] .pulse-loading span { background: linear-gradient(90deg, #222a37, #293240, #222a37); }
 html[data-theme="dark"] .pulse-empty-mark { color: #aebaff; background: #293553; }
 html[data-theme="dark"] .kb-modebar { border-color: #303947; background: rgba(30,37,49,.95); }
-html[data-theme="dark"] .pulse-kpis > div, html[data-theme="dark"] .pulse-detail-card, html[data-theme="dark"] .pulse-table-card { border-color: #303a49; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
+html[data-theme="dark"] .pulse-kpis > div, html[data-theme="dark"] .pulse-detail-card, html[data-theme="dark"] .pulse-table-card, html[data-theme="dark"] .pulse-verdicts { border-color: #303a49; box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 html[data-theme="dark"] .pulse-table th { border-bottom-color: #394352; }
 html[data-theme="dark"] .pulse-table td { border-bottom-color: #2a3341; }
 html[data-theme="dark"] .pulse-removed { color: #f19591; background: #352326; }

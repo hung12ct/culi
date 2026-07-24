@@ -69,6 +69,34 @@ func TestBuildAnalyticsRanksAndFilters(t *testing.T) {
 		t.Fatalf("repos = %+v", got.Repos)
 	}
 
+	// Effectiveness: rules/a has pulls (helpful), the others have no signal
+	// and few observations (uncertain). Verdicts must survive filtering.
+	if err := s.AddFeedback(ctx, "rules/a", store.FeedbackInjected, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddFeedback(ctx, "rules/a", store.FeedbackExpanded, 2); err != nil {
+		t.Fatal(err)
+	}
+	got, err = srv.buildAnalytics(ctx, analyticsFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cards[0].Bucket != store.EffHelpful || got.Cards[0].PullRate != "40%" {
+		t.Fatalf("card verdict = %q / %q", got.Cards[0].Bucket, got.Cards[0].PullRate)
+	}
+	if got.Summary.Helpful != 1 || got.Summary.Uncertain != 2 {
+		t.Fatalf("verdict summary = %+v", got.Summary)
+	}
+	filtered, err := srv.buildAnalytics(ctx, analyticsFilter{Harness: "codex"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range filtered.Cards {
+		if c.ID == "rules/a" && c.Bucket != store.EffHelpful {
+			t.Fatalf("verdict flipped under filter: %+v", c)
+		}
+	}
+
 	codex, err := srv.buildAnalytics(ctx, analyticsFilter{Harness: "codex"})
 	if err != nil {
 		t.Fatal(err)

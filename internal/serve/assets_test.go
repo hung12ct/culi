@@ -64,6 +64,21 @@ func TestConsoleUXContracts(t *testing.T) {
 			t.Errorf("knowledge analytics UI missing %q", want)
 		}
 	}
+	for _, want := range []string{"function effBadge", "<th>Verdict</th>", "pulse-verdicts", "c.eff ? effBadge(c.eff.bucket, c.eff.note)"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("effectiveness UI missing %q", want)
+		}
+	}
+	for _, want := range []string{"bucket: 'helpful'", "bucket: 'noisy'", "eff('helpful')"} {
+		if !strings.Contains(seed, want) {
+			t.Errorf("standalone effectiveness data missing %q", want)
+		}
+	}
+	for _, want := range []string{".eff-badge", ".pulse-verdicts"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("effectiveness CSS missing %q", want)
+		}
+	}
 	for _, want := range []string{"Learning backend", "Codex terminal", "OpenAI API", "setLearningProvider", `data-key="openai_api_key_file"`, `data-act="setProvider:`} {
 		if !strings.Contains(js+seed, want) {
 			t.Errorf("learning settings UI missing %q", want)

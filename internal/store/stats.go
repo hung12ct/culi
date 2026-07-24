@@ -109,8 +109,8 @@ func (s *Store) UtilityMultipliers(ctx context.Context) (map[string]float64, err
 			return nil, fmt.Errorf("store: scanning card stats: %w", err)
 		}
 		f := decayFactor(parseStatsTime(last), now)
-		pos := 3*expanded*f + 5*referenced*f
-		neg := 5 * downvoted * f
+		pos := wExpanded*expanded*f + wReferenced*referenced*f
+		neg := wDownvoted * downvoted * f
 		m := 2 * (pos + 1) / (pos + neg + 2)
 		out[id] = min(1.5, max(0.5, m))
 	}
