@@ -208,6 +208,7 @@ const TITLES = {
 function renderStrip() {
   const st = state.status || {};
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  set('s-version', st.version || '—');
   set('s-cards', st.cards != null ? st.cards : '—');
   set('s-saved', st.savedPct != null ? st.savedPct : '—');
   set('s-review', (state.candidates ? state.candidates.length : (st.toReview != null ? st.toReview : '—')));

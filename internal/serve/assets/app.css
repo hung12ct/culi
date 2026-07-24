@@ -95,6 +95,7 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible, input:focu
 .strip .amber { color: var(--amber); }
 .strip-serve { display: flex; align-items: center; gap: 7px; color: #8f8f98; }
 .strip-serve-name { color: #c7c7cc; }
+.strip-version { padding: 1px 6px; border: 1px solid var(--hair2); border-radius: 999px; color: var(--faint); font-size: 10px; line-height: 16px; }
 .strip-sep { margin: 0 12px; color: #3a3a40; }
 .strip-addr { font-size: 11px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }

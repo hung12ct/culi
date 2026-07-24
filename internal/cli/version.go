@@ -23,13 +23,23 @@ func Version(_ []string) error {
 	return nil
 }
 
+// versionLabel is the compact build identity shared by terminal output and
+// the console. Module installs carry bi.Main.Version even when the Go proxy
+// cannot provide VCS revision/time settings.
+func versionLabel() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+		return bi.Main.Version
+	}
+	return "(devel)"
+}
+
 func versionString() string {
-	v := version
+	v := versionLabel()
 	commit, built, dirty := "unknown", "unknown", false
 	if bi, ok := debug.ReadBuildInfo(); ok {
-		if v == "" && bi.Main.Version != "" {
-			v = bi.Main.Version
-		}
 		for _, s := range bi.Settings {
 			switch s.Key {
 			case "vcs.revision":
@@ -40,9 +50,6 @@ func versionString() string {
 				dirty = s.Value == "true"
 			}
 		}
-	}
-	if v == "" {
-		v = "(devel)"
 	}
 	if len(commit) > 12 {
 		commit = commit[:12]

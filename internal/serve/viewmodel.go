@@ -26,6 +26,7 @@ import (
 
 type statusPayload struct {
 	Cards         int     `json:"cards"`
+	Version       string  `json:"version"`
 	SavedPct      string  `json:"savedPct"`
 	ToReview      int     `json:"toReview"`
 	ToLearn       int     `json:"toLearn"` // queued transcripts waiting to be mined
@@ -304,6 +305,7 @@ func (s *server) buildStatus(ctx context.Context) statusPayload {
 	}
 	return statusPayload{
 		Cards:         len(metas),
+		Version:       s.version,
 		SavedPct:      fmtPct(sv.Retrieval.Counterfactual.DumpTokens, sv.Retrieval.Counterfactual.SavedPercent),
 		ToReview:      toReview,
 		ToLearn:       sv.Learning.InboxPending,

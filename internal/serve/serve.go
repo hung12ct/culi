@@ -28,10 +28,11 @@ import (
 // Options carries everything Run needs; the caller (cli.Serve) owns the store
 // and config lifecycle.
 type Options struct {
-	Base  string
-	Cfg   config.Config
-	Store *store.Store
-	Addr  string
+	Base    string
+	Cfg     config.Config
+	Store   *store.Store
+	Addr    string
+	Version string
 	// StatsFn returns the `culi stats` report (as an opaque value the console
 	// re-marshals to JSON), injected so serve need not import the cli package.
 	StatsFn func(context.Context) any
@@ -44,6 +45,7 @@ type server struct {
 	base    string
 	kdir    string
 	addr    string
+	version string
 	store   *store.Store
 	statsFn func(context.Context) any
 	writeMu sync.Mutex
@@ -80,6 +82,7 @@ func Run(ctx context.Context, opt Options) error {
 		base:    opt.Base,
 		kdir:    config.KnowledgeDir(opt.Base),
 		addr:    addr,
+		version: opt.Version,
 		cfg:     opt.Cfg,
 		store:   opt.Store,
 		statsFn: opt.StatsFn,

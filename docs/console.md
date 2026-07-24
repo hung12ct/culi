@@ -8,7 +8,8 @@ culi serve
 
 It listens on `localhost:7378` by default. The console is a local control surface over the same
 Markdown store, SQLite activity index, and YAML configuration used by the CLI. It is not required
-for hooks or MCP to work.
+for hooks or MCP to work. The status strip shows the running Culi version so you can verify which
+installed binary is serving the embedded UI.
 
 ## Home
 

@@ -4,7 +4,7 @@
 
 const SEED = {
   status: {
-    cards: 140, savedPct: '~99%', toReview: 4, addr: 'localhost:7378',
+    cards: 140, version: 'v0.0.0-dev', savedPct: '~99%', toReview: 4, addr: 'localhost:7378',
     spendToday: 0.14, spendCap: 1.0, failedJobs: 1, ollamaOffline: true, serveDown: false,
   },
   overview: {

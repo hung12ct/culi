@@ -45,6 +45,7 @@ func Serve(args []string) error {
 		Cfg:     cfg,
 		Store:   s,
 		Addr:    *addr,
+		Version: versionLabel(),
 		StatsFn: func(c context.Context) any { return gather(c, s, base) },
 	})
 }

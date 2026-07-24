@@ -25,6 +25,15 @@ func TestConsoleUXContracts(t *testing.T) {
 			t.Errorf("index missing %q", want)
 		}
 	}
+	if !strings.Contains(html, `id="s-version"`) {
+		t.Error("status strip must expose the running Culi version")
+	}
+	if !strings.Contains(js, `set('s-version', st.version || '—')`) {
+		t.Error("status rendering must populate the running Culi version")
+	}
+	if !strings.Contains(seed, `version: 'v0.0.0-dev'`) {
+		t.Error("standalone console data must include a representative version")
+	}
 	for _, want := range []string{"culi-theme", `data-act="toggleTheme"`, "theme-moon", "theme-sun"} {
 		if !strings.Contains(html, want) {
 			t.Errorf("theme control missing %q", want)
