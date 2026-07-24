@@ -735,6 +735,77 @@ button:focus-visible, a:focus-visible, [role="button"]:focus-visible, input:focu
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }
 
+/* ---------- reconcile (import / merge / apply) ---------- */
+.rec { flex: 1; min-height: 0; overflow: auto; padding: 24px 30px 42px; max-width: 1000px; }
+.rec-intro { color: var(--muted); font-size: 13px; line-height: 1.55; margin-bottom: 20px; max-width: 720px; }
+.rec-step { background: var(--panel); border: 1px solid var(--hair2); border-radius: 13px; padding: 18px 20px; margin-bottom: 16px; }
+.rec-step-head { display: flex; align-items: flex-start; gap: 13px; }
+.rec-step-head > div { flex: 1; }
+.rec-step-head h3 { font-size: 15px; color: var(--tx); letter-spacing: -.01em; }
+.rec-step-head p { margin-top: 3px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.rec-step-n { flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%; background: var(--teal); color: var(--teal-ink); font-size: 12.5px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.rec-step .btn { flex: 0 0 auto; }
+.btn.is-disabled { opacity: .5; cursor: not-allowed; }
+
+.rec-empty { margin-top: 14px; padding: 14px 16px; border: 1px dashed var(--hair3); border-radius: 9px; color: var(--faint); font-size: 12.5px; }
+.rec-scan-summary { margin-top: 14px; font-size: 13px; color: var(--tx2); }
+.rec-scan-summary b { font-size: 15px; }
+.rec-scan-summary span { color: var(--faint); margin: 0 4px; }
+.rec-when { float: right; color: var(--faint); font-size: 11px; }
+.rec-repos { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.rec-repo { display: flex; flex-direction: column; gap: 2px; padding: 8px 11px; border: 1px solid var(--hair); border-radius: 8px; background: var(--well); }
+.rec-repo-name { font-size: 12.5px; font-weight: 600; color: var(--tx); }
+.rec-repo-meta { font-size: 10.5px; color: var(--faint); font-family: var(--mono); }
+.rec-clusters { margin-top: 12px; border-top: 1px solid var(--hair); padding-top: 10px; }
+.rec-cluster { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12.5px; }
+.rec-cluster-kind { color: var(--faint); font-size: 10.5px; min-width: 40px; }
+.rec-cluster-name { color: var(--tx2); }
+.rec-cluster-repos { color: var(--faint); font-size: 11px; }
+.rec-chip { padding: 1px 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600; }
+
+.rec-merge-idle, .rec-merge-confirm { margin-top: 14px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--tx2); }
+.rec-merge-confirm { padding: 12px 14px; border: 1px solid var(--amber); border-radius: 9px; background: rgba(230,172,92,.08); }
+.rec-merge-idle span { flex: 1; color: var(--muted); }
+.rec-progress { height: 8px; border-radius: 5px; background: var(--well); overflow: hidden; margin-top: 14px; }
+.rec-progress-fill { height: 100%; background: var(--teal); transition: width .5s ease; }
+.rec-merge-status { margin-top: 9px; font-size: 12px; color: var(--muted); }
+.rec-merge-status b { color: var(--tx); }
+.rec-merge-err { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--red); border-radius: 9px; background: rgba(220,76,76,.08); font-size: 12px; color: var(--tx2); }
+.rec-merge-err .mono { color: var(--red); }
+.rec-merge-err div { margin-top: 5px; color: var(--faint); }
+.rec-spin { display: inline-block; width: 11px; height: 11px; border: 2px solid var(--hair3); border-top-color: var(--teal); border-radius: 50%; animation: spin .7s linear infinite; vertical-align: -1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.rec-apply-summary { margin-top: 14px; font-size: 13px; color: var(--tx2); }
+.rec-apply-summary b { font-size: 15px; }
+.rec-apply-summary span { color: var(--faint); margin: 0 4px; }
+.rec-group-label { margin: 16px 0 7px; font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); }
+.rec-files { display: flex; flex-direction: column; gap: 4px; }
+.rec-file-wrap { border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; }
+.rec-file { display: flex; align-items: center; gap: 8px; padding: 8px 11px; cursor: pointer; font-size: 12px; }
+.rec-file:hover { background: var(--well); }
+.rec-caret { color: var(--faint); font-size: 10px; width: 10px; }
+.rec-file-rel { color: var(--tx2); font-size: 11.5px; }
+.rec-delta { font-family: var(--mono); font-size: 11px; }
+.rec-add { color: var(--teal-deep); } .rec-del { color: var(--red); }
+.rec-new { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; color: var(--teal-deep); background: rgba(45,150,136,.12); padding: 1px 6px; border-radius: 4px; }
+.rec-diff { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 10px 11px; border-top: 1px solid var(--hair); background: var(--well); }
+.rec-diff-col:only-child { grid-column: 1 / -1; }
+.rec-diff-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin-bottom: 5px; }
+.rec-diff pre { max-height: 320px; overflow: auto; font-family: var(--mono); font-size: 10.5px; line-height: 1.45; color: var(--tx2); white-space: pre-wrap; word-break: break-word; }
+.rec-res-target { font-size: 11px; color: var(--tx2); }
+.rec-res-missing { font-size: 11px; color: var(--amber); }
+.rec-res-note { padding: 0 11px 11px; font-size: 11px; color: var(--faint); line-height: 1.5; }
+.rec-apply-bar { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hair); }
+.rec-force { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--tx2); cursor: pointer; }
+.rec-force.faint { color: var(--faint); }
+.rec-force input { accent-color: var(--teal); }
+.rec-apply-bar .btn { flex: 0 0 auto; }
+
+html[data-theme="dark"] .rec-step, html[data-theme="dark"] .rec-repo { border-color: #303a49; }
+html[data-theme="dark"] .rec-file-wrap { border-color: #2a3341; }
+html[data-theme="dark"] .rec-file:hover, html[data-theme="dark"] .rec-diff { background: #171d27; }
+
 /* ---------- production light visual system ---------- */
 :root {
   --bg: #f4f6fa;

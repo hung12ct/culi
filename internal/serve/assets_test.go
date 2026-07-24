@@ -94,6 +94,23 @@ func TestConsoleUXContracts(t *testing.T) {
 			t.Errorf("edit-form CSS missing %q", want)
 		}
 	}
+	// Reconcile screen: nav entry, the three-step flow, and its actions/CSS.
+	for _, want := range []string{"function screenReconcile", "/api/import/scan", "/api/import/merge", "/api/import/apply", "/api/import/discard", "syncMergePoll"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("reconcile UI missing %q", want)
+		}
+	}
+	if !strings.Contains(js, "reconcile:['Reconcile'") {
+		t.Error("reconcile screen must have a title/subtitle entry")
+	}
+	for _, want := range []string{".rec-step", ".rec-progress", ".rec-diff"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("reconcile CSS missing %q", want)
+		}
+	}
+	if !strings.Contains(seed, "import: {") {
+		t.Error("standalone console data must include a reconcile/import payload")
+	}
 	for _, want := range []string{"Learning backend", "Codex terminal", "OpenAI API", "setLearningProvider", `data-key="openai_api_key_file"`, `data-act="setProvider:`} {
 		if !strings.Contains(js+seed, want) {
 			t.Errorf("learning settings UI missing %q", want)

@@ -49,6 +49,7 @@ type server struct {
 	store   *store.Store
 	statsFn func(context.Context) any
 	writeMu sync.Mutex
+	merge   mergeJob // background import-merge job tracking
 
 	cfgMu sync.RWMutex // guards cfg (reloaded when repos are edited)
 	cfg   config.Config
@@ -107,6 +108,11 @@ func Run(ctx context.Context, opt Options) error {
 	mux.HandleFunc("GET /api/cards/{id}", s.handleCard)
 	mux.HandleFunc("GET /api/activity/injections", s.handleInjections)
 	mux.HandleFunc("GET /api/activity/runs", s.handleRuns)
+	mux.HandleFunc("GET /api/import", s.handleImport)
+	mux.HandleFunc("POST /api/import/scan", s.handleImportScan)
+	mux.HandleFunc("POST /api/import/merge", s.handleImportMerge)
+	mux.HandleFunc("POST /api/import/apply", s.handleImportApply)
+	mux.HandleFunc("POST /api/import/discard", s.handleImportDiscard)
 	mux.HandleFunc("GET /api/config", s.handleConfigGet)
 	mux.HandleFunc("POST /api/config", s.handleConfigPost)
 	mux.HandleFunc("GET /api/repos", s.handleReposGet)

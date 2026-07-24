@@ -27,6 +27,7 @@ const ICONS = {
   review: '<rect x="3" y="3" width="18" height="18" rx="4"/><path d="m7.5 12 3 3 6-6"/>',
   knowledge: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v17H6.5A2.5 2.5 0 0 0 4 22Z"/><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H13v17h4.5A2.5 2.5 0 0 1 20 22Z"/>',
   activity: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/><path d="M4 4v16h16"/>',
+  reconcile: '<path d="M4 7h11"/><path d="m11 4 3 3-3 3"/><path d="M20 17H9"/><path d="m13 20-3-3 3-3"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1V21H9.55v-.09A1.7 1.7 0 0 0 8.4 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1-.4H2.3V9.55h.09A1.7 1.7 0 0 0 4 8.4a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.46 3.6l.06.06A1.7 1.7 0 0 0 8.4 4a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1V2.3h4.05v.09A1.7 1.7 0 0 0 15 4a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.4a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1 .4h.09v4.05H21a1.7 1.7 0 0 0-1.6 1.15Z"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
 };
@@ -115,6 +116,11 @@ const state = {
   status: null, overview: null, candidates: null,
   cards: null, cardDetail: {}, sessions: null, runs: null, settings: null,
   settingsDraft: null,
+  reconcile: null,        // /api/import payload
+  recForce: false,        // apply with --force (overwrite conflicts)
+  recOpen: {},            // expanded conflict/residual keys
+  recBusy: '',            // in-flight reconcile action label (disables buttons)
+  recPoll: null,          // merge progress poll timer
 };
 let toastTimer = null;
 let confirmTimer = null;
@@ -183,6 +189,7 @@ async function loadSessions()  {
 }
 async function loadRuns()      { try { return await api('/api/activity/runs'); } catch { return SEED.runs; } }
 async function loadSettings()  { try { return await api('/api/config'); }     catch { return SEED.settings; } }
+async function loadImport()    { try { return await api('/api/import'); }     catch { return SEED.import; } }
 
 async function postAction(path) {
   // Best-effort write; UI is optimistic and git-backed on the server side.
@@ -208,6 +215,7 @@ const NAV = [
   { key: 'review',   label: 'Review',         icon: 'review' },
   { key: 'kb',       label: 'Knowledge',      icon: 'knowledge' },
   { key: 'activity', label: 'Activity',       icon: 'activity' },
+  { key: 'reconcile',label: 'Reconcile',      icon: 'reconcile' },
   { key: 'settings', label: 'Settings',       icon: 'settings' },
 ];
 const TITLES = {
@@ -215,6 +223,7 @@ const TITLES = {
   review:   ['Review', () => `${(state.candidates || []).length} proposed lessons waiting for you`],
   kb:       ['Knowledge', () => state.kbMode === 'analytics' ? 'delivery analytics across agents and repositories' : `${(state.status && state.status.cards) || (state.cards || []).length} reusable cards`],
   activity: ['Activity', 'see what Culi sent, learned, and why'],
+  reconcile:['Reconcile', 'fold duplicated rules & skills across repos into one canonical set'],
   settings: ['Settings', 'tune retrieval and learning safely'],
 };
 
@@ -857,6 +866,132 @@ function screenActivity() {
   return `<div class="act">${seg}${body}</div>`;
 }
 
+// ---------- reconcile (import / merge / apply) ----------
+// A guided top-to-bottom flow: Scan the repos → Merge the divergent copies
+// (a paid LLM job, run in the background with a progress bar) → review and
+// Apply the staged cards, and place the leftover CLAUDE.md residuals.
+function recClassChip(cls) {
+  const m = { diverged: ['diverged', COLOR.warning], unique: ['unique', COLOR.primary], identical: ['identical', COLOR.neutral], superset: ['superset', COLOR.neutral] };
+  const [label, color] = m[cls] || m.identical;
+  return `<span class="rec-chip" style="background:${alpha(color, 0.14)};color:${color};">${label}</span>`;
+}
+function recBtn(act, label, cls, opts) {
+  const o = opts || {};
+  const dis = state.recBusy || o.disabled;
+  return `<button class="${cls}${dis ? ' is-disabled' : ''}" data-act="${esc(act)}"${dis ? ' disabled' : ''}>${state.recBusy === act ? '…' : esc(label)}</button>`;
+}
+
+function recStepScan(im) {
+  const sc = im.scan || {};
+  const repos = (sc.repos || []).map(r =>
+    `<div class="rec-repo"><span class="rec-repo-name">${esc(r.name)}</span>
+      <span class="rec-repo-meta">${r.agents}a · ${r.skills}s${r.claudeMd ? ' · CLAUDE.md' : ''}</span></div>`).join('');
+  const clusters = (sc.clusters || []).slice(0, 40).map(c =>
+    `<div class="rec-cluster"><span class="rec-cluster-kind mono">${esc(c.kind)}</span>
+      <span class="rec-cluster-name">${esc(c.name)}</span>${recClassChip(c.class)}
+      <span class="spacer"></span><span class="rec-cluster-repos">${c.repos} repos</span></div>`).join('');
+  const summary = sc.scanned
+    ? `<div class="rec-scan-summary"><b class="warn">${sc.diverged}</b> diverged <span>·</span> <b>${sc.unique}</b> unique <span>·</span> <b>${sc.identical}</b> identical <span class="rec-when">scanned ${esc(sc.at || '')}</span></div>`
+    : `<div class="rec-empty">No scan yet. Scan inventories every watched repo and finds rules/skills that have drifted apart.</div>`;
+  return `<section class="rec-step">
+    <div class="rec-step-head"><span class="rec-step-n">1</span><div><h3>Scan repositories</h3><p>Inventory watched repos and cluster shared agents & skills by how far their copies have drifted. Fast, read-only, no LLM.</p></div>
+      ${recBtn('recScan', sc.scanned ? 'Re-scan' : 'Scan now', 'btn btn-teal')}</div>
+    ${summary}
+    ${sc.scanned ? `<div class="rec-repos">${repos}</div>${clusters ? `<div class="rec-clusters">${clusters}</div>` : ''}` : ''}
+  </section>`;
+}
+
+function recStepMerge(im) {
+  const m = im.merge || {};
+  const sc = im.scan || {};
+  if (!sc.scanned) return '';
+  let body;
+  if (m.running) {
+    const pct = m.total > 0 ? Math.min(100, Math.round((m.done / m.total) * 100)) : 0;
+    body = `<div class="rec-merge-running">
+      <div class="rec-progress"><div class="rec-progress-fill" style="width:${pct}%"></div></div>
+      <div class="rec-merge-status"><span class="rec-spin"></span> Merging… <b>${m.done}</b>/${m.total} units · this runs in the background, you can leave this page</div></div>`;
+  } else if (m.err) {
+    body = `<div class="rec-merge-err">Last merge failed: <span class="mono">${esc(m.err)}</span><div>Re-run to resume from where it stopped — finished units are kept.</div></div>`;
+  } else if (!m.hasWork) {
+    body = `<div class="rec-empty">Nothing to merge — no diverged clusters or CLAUDE.md files in the last scan.</div>`;
+  } else if (state.recBusy === 'recMergeArmed') {
+    body = `<div class="rec-merge-confirm">⚠ This starts a real LLM merge — roughly <b>a minute per divergent unit</b> and it spends model budget (or uses your CLI subscription). ${recBtn('recMerge', 'Yes, start merge', 'btn btn-teal')} <button class="btn btn-outline" data-act="recMergeCancel">Cancel</button></div>`;
+  } else {
+    body = `<div class="rec-merge-idle"><span>${sc.diverged} diverged + CLAUDE.md decomposition to synthesize.</span>${recBtn('recMergeArm', 'Merge divergent copies', 'btn btn-teal')}</div>`;
+  }
+  return `<section class="rec-step">
+    <div class="rec-step-head"><span class="rec-step-n">2</span><div><h3>Merge divergent copies</h3><p>Synthesize each cluster's variants into one canonical card, and decompose each repo's CLAUDE.md. Output is staged for review — nothing touches your store yet.</p></div></div>
+    ${body}
+  </section>`;
+}
+
+function recCardDiff(c, key) {
+  const open = !!state.recOpen[key];
+  const delta = c.conflict ? `<span class="rec-delta"><span class="rec-add">+${c.added}</span> <span class="rec-del">−${c.removed}</span></span>` : `<span class="rec-new">new</span>`;
+  const detail = open ? `<div class="rec-diff">
+    ${c.conflict ? `<div class="rec-diff-col"><div class="rec-diff-lbl">Current (live)</div><pre>${esc(c.live || '')}</pre></div>` : ''}
+    <div class="rec-diff-col"><div class="rec-diff-lbl">${c.conflict ? 'New (staged)' : 'Staged'}</div><pre>${esc(c.staged || '')}</pre></div>
+  </div>` : '';
+  return `<div class="rec-file-wrap ${open ? 'open' : ''}">
+    <div class="rec-file" data-act="recToggle:${esc(key)}" role="button" tabindex="0">
+      <span class="rec-caret">${open ? '▾' : '▸'}</span><span class="rec-file-rel mono">${esc(c.rel)}</span>
+      <span class="spacer"></span>${delta}</div>${detail}</div>`;
+}
+
+function recResidual(r, key) {
+  const open = !!state.recOpen[key];
+  const target = r.missing
+    ? `<span class="rec-res-missing" title="No matching watched repo / CLAUDE.md found">no target repo</span>`
+    : `<span class="rec-res-target mono" title="${esc(r.repoPath)}">${esc(r.repo)}/CLAUDE.md</span>`;
+  const detail = open ? `<div class="rec-diff">
+    ${!r.missing ? `<div class="rec-diff-col"><div class="rec-diff-lbl">Current repo CLAUDE.md</div><pre>${esc(r.live || '')}</pre></div>` : ''}
+    <div class="rec-diff-col"><div class="rec-diff-lbl">Staged replacement</div><pre>${esc(r.staged || '')}</pre></div>
+  </div><div class="rec-res-note">Residuals aren't applied automatically — review the diff and hand-place the staged version into the repo's CLAUDE.md so any edits you've made since aren't lost.</div>` : '';
+  return `<div class="rec-file-wrap ${open ? 'open' : ''}">
+    <div class="rec-file" data-act="recToggle:${esc(key)}" role="button" tabindex="0">
+      <span class="rec-caret">${open ? '▾' : '▸'}</span><span class="rec-file-rel mono">${esc(r.repo)}</span>
+      <span class="spacer"></span>${target}</div>${detail}</div>`;
+}
+
+function recStepApply(im) {
+  const st = im.staging || {};
+  if (!st.present) {
+    return `<section class="rec-step">
+      <div class="rec-step-head"><span class="rec-step-n">3</span><div><h3>Review & apply</h3><p>After a merge, staged cards appear here to review before they land in your knowledge store.</p></div></div>
+      <div class="rec-empty">Nothing staged. Run a merge first.</div>
+    </section>`;
+  }
+  const ready = (st.ready || []).map((c, i) => recCardDiff(c, 'r' + i)).join('');
+  const conflicts = (st.conflicts || []).map((c, i) => recCardDiff(c, 'c' + i)).join('');
+  const residuals = (st.residuals || []).map((r, i) => recResidual(r, 'd' + i)).join('');
+  const nReady = (st.ready || []).length, nConf = (st.conflicts || []).length, nRes = (st.residuals || []).length;
+  const applyLabel = state.recForce ? `Apply ${nReady + nConf} (overwrite ${nConf})` : (nReady ? `Apply ${nReady} ready` : 'Apply');
+  return `<section class="rec-step">
+    <div class="rec-step-head"><span class="rec-step-n">3</span><div><h3>Review & apply</h3><p>Ready cards land silently; conflicts differ from a live card and only overwrite when you allow it. Every apply is one git commit — fully revertible.</p></div></div>
+    <div class="rec-apply-summary"><b>${nReady}</b> ready <span>·</span> <b class="warn">${nConf}</b> conflict${nConf === 1 ? '' : 's'} <span>·</span> <b>${nRes}</b> residual${nRes === 1 ? '' : 's'}</div>
+    ${nReady ? `<div class="rec-group-label">Ready to apply</div><div class="rec-files">${ready}</div>` : ''}
+    ${nConf ? `<div class="rec-group-label">Conflicts <span class="faint">— differ from live cards</span></div><div class="rec-files">${conflicts}</div>` : ''}
+    ${nRes ? `<div class="rec-group-label">Residual CLAUDE.md <span class="faint">— place by hand</span></div><div class="rec-files">${residuals}</div>` : ''}
+    <div class="rec-apply-bar">
+      <label class="rec-force ${nConf ? '' : 'faint'}"><input type="checkbox" ${state.recForce ? 'checked' : ''} ${nConf ? '' : 'disabled'} data-act="recForce" /> overwrite ${nConf} conflict${nConf === 1 ? '' : 's'}</label>
+      <div class="spacer"></div>
+      ${destrBtn('recDiscard', 'Discard staging', 'btn btn-red-outline')}
+      ${recBtn('recApply', applyLabel, 'btn btn-teal', { disabled: !nReady && !(state.recForce && nConf) })}
+    </div>
+  </section>`;
+}
+
+function screenReconcile() {
+  const im = state.reconcile || SEED.import;
+  return `<div class="rec">
+    <div class="rec-intro">Culi keeps one canonical set of rules, skills, and agents. When the same card drifts across repos, reconcile folds the copies back together — you review every change before it lands.</div>
+    ${recStepScan(im)}
+    ${recStepMerge(im)}
+    ${recStepApply(im)}
+  </div>`;
+}
+
 // ---------- settings ----------
 function settingValue(key, fallback) {
   const draft = state.settingsDraft;
@@ -949,7 +1084,7 @@ function screenSettings() {
 }
 
 // ---------- top-level render ----------
-const SCREENS = { overview: screenOverview, review: screenReview, kb: screenKb, activity: screenActivity, settings: screenSettings };
+const SCREENS = { overview: screenOverview, review: screenReview, kb: screenKb, activity: screenActivity, reconcile: screenReconcile, settings: screenSettings };
 function renderScreen() { document.getElementById('screen').innerHTML = SCREENS[state.screen](); }
 function render() { renderStrip(); renderNav(); renderSpend(); renderHeader(); renderScreen(); }
 
@@ -1000,6 +1135,27 @@ async function ensure(screen) {
     if (!state.runs) state.runs = await loadRuns();
   }
   if (screen === 'settings' && !state.settings) state.settings = await loadSettings();
+  if (screen === 'reconcile') {
+    if (!state.reconcile) state.reconcile = await loadImport();
+    syncMergePoll();
+  }
+}
+
+// syncMergePoll starts a progress poller while a merge runs and stops it once
+// the job finishes (or we leave the screen). Polling re-fetches /api/import so
+// the bar advances and the Apply step lights up when staging appears.
+function syncMergePoll() {
+  const running = state.reconcile && state.reconcile.merge && state.reconcile.merge.running;
+  if (running && !state.recPoll) {
+    state.recPoll = setInterval(async () => {
+      state.reconcile = await loadImport();
+      if (state.screen === 'reconcile') renderScreen();
+      if (!(state.reconcile.merge && state.reconcile.merge.running)) syncMergePoll();
+    }, 3000);
+  } else if (!running && state.recPoll) {
+    clearInterval(state.recPoll);
+    state.recPoll = null;
+  }
 }
 async function goto(screen) {
   state.screen = screen;
@@ -1087,7 +1243,7 @@ async function editCandidate() {
 }
 
 // ---------- event delegation ----------
-const DESTRUCTIVE = new Set(['cardRetire', 'cardRemove', 'reject-noisy', 'revert']);
+const DESTRUCTIVE = new Set(['cardRetire', 'cardRemove', 'reject-noisy', 'revert', 'recDiscard']);
 
 function splitAct(act) {
   const i = act.indexOf(':');
@@ -1132,6 +1288,50 @@ async function revertCard(sha) {
   const d = await loadCard(id);
   if (d) state.cardDetail[id] = d;
   await ensure(state.screen);
+  render();
+}
+
+// recRun runs a one-shot reconcile POST (scan/discard), disabling buttons while
+// in flight, then refreshes the whole Import payload.
+async function recRun(busyKey, path, okMsg) {
+  if (state.recBusy) return;
+  state.recBusy = busyKey; renderScreen();
+  const res = await postJSON(path, {});
+  state.recBusy = '';
+  if (res && res.error) { showToast(res.error, COLOR.warning); }
+  else { showToast(okMsg, COLOR.success); }
+  state.reconcile = await loadImport();
+  renderScreen();
+}
+
+// recStartMerge kicks off the background merge, then flips into polling so the
+// progress bar animates without a manual refresh.
+async function recStartMerge() {
+  state.recBusy = 'recMerge'; renderScreen();
+  const res = await postJSON('/api/import/merge', {});
+  state.recBusy = '';
+  if (res && res.ok === false) { showToast(res.note || 'could not start merge', COLOR.warning); renderScreen(); return; }
+  showToast('Merge started — running in the background', COLOR.success);
+  state.reconcile = await loadImport();
+  renderScreen();
+  syncMergePoll();
+}
+
+// recApply lands the staged cards (with the force toggle), then refreshes both
+// the Import view and the caches the new cards affect.
+async function recApply() {
+  if (state.recBusy) return;
+  state.recBusy = 'recApply'; renderScreen();
+  const res = await postJSON('/api/import/apply' + (state.recForce ? '?force=1' : ''), {});
+  state.recBusy = '';
+  if (res && res.error) { showToast(res.error, COLOR.warning); renderScreen(); return; }
+  const parts = [`${res.applied} applied`];
+  if (res.conflicts) parts.push(`${res.conflicts} conflict${res.conflicts === 1 ? '' : 's'} kept`);
+  if (res.residual) parts.push(`${res.residual} residual${res.residual === 1 ? '' : 's'}`);
+  showToast(parts.join(' · '), COLOR.success);
+  state.recForce = false;
+  state.cards = null; state.overview = null; state.analytics = null; state.status = null;
+  state.reconcile = await loadImport();
   render();
 }
 
@@ -1223,6 +1423,14 @@ function handleAction(act) {
     }
     case 'kbSaveEdit': cardEditSave(); return;
     case 'kbCancelEdit': state.kbEditing = false; renderScreen(); return;
+    case 'recScan': recRun('recScan', '/api/import/scan', 'Scanned repositories'); return;
+    case 'recMergeArm': state.recBusy = 'recMergeArmed'; renderScreen(); return;
+    case 'recMergeCancel': state.recBusy = ''; renderScreen(); return;
+    case 'recMerge': recStartMerge(); return;
+    case 'recApply': recApply(); return;
+    case 'recDiscard': recRun('recDiscard', '/api/import/discard', 'Discarded staged merge'); return;
+    case 'recForce': state.recForce = !state.recForce; renderScreen(); return;
+    case 'recToggle': state.recOpen[arg] = !state.recOpen[arg]; renderScreen(); return;
     default: return;
   }
 }
@@ -1272,6 +1480,7 @@ async function refresh() {
     else { state.cards = null; state.cardDetail = {}; }
   }
   else if (state.screen === 'activity') { state.sessions = null; state.runs = null; }
+  else if (state.screen === 'reconcile') state.reconcile = null;
   else if (state.screen === 'settings') state.settings = null;
   await ensure(state.screen);
   render();

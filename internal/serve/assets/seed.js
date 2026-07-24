@@ -144,6 +144,32 @@ const SEED = {
         { id: 'skills/git-worktree', short: '3b1f', gran: 'body', tok: 540 },
         { id: 'agents/reviewer', short: '77ac', gran: 'body', tok: 388 }] }] },
   ],
+  import: {
+    scan: {
+      scanned: true, at: 'today 11:34', diverged: 15, unique: 6, identical: 3,
+      repos: [
+        { name: 'phin', path: '/Users/you/Code/phin', agents: 7, skills: 8, claudeMd: true },
+        { name: 'cutpilot', path: '/Users/you/Code/cutpilot', agents: 7, skills: 9, claudeMd: true },
+        { name: 'culi', path: '/Users/you/Code/culi', agents: 7, skills: 8, claudeMd: true },
+      ],
+      clusters: [
+        { key: 'agent/code-reviewer', kind: 'agent', name: 'code-reviewer', class: 'diverged', repos: 5, similarity: 0.23 },
+        { key: 'skill/worktree', kind: 'skill', name: 'worktree', class: 'diverged', repos: 4, similarity: 0.76 },
+        { key: 'skill/macos-style', kind: 'skill', name: 'macos-style', class: 'unique', repos: 2, similarity: 0.13 },
+      ],
+    },
+    merge: { running: false, done: 20, total: 20, hasWork: true },
+    staging: {
+      present: true,
+      ready: [{ rel: 'rules/new-card.md', conflict: false, staged: '---\ntitle: New card\n---\nbody' }],
+      conflicts: [
+        { rel: 'skills/risk/SKILL.md', conflict: true, added: 3, removed: 1, live: '---\ntitle: risk (old)\n---\nOld body.', staged: '---\ntitle: risk (new)\n---\nNew, sharper body with tagby-backend folded in.' },
+      ],
+      residuals: [
+        { rel: 'residual/phin.CLAUDE.md', repo: 'phin', repoPath: '/Users/you/Code/phin', live: '# phin\nCurrent CLAUDE.md…', staged: '# phin\nDecomposed CLAUDE.md…', missing: false },
+      ],
+    },
+  },
   runs: [
     { date: '2026-07-20 08:12', mined: '31', clean: '27', candidates: '4', patterns: '6', spend: '$0.09', dot: '#dc4c4c', failed: true },
     { date: '2026-07-13 08:10', mined: '44', clean: '39', candidates: '7', patterns: '9', spend: '$0.12', dot: '#169b6b', failed: false },
