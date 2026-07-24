@@ -677,7 +677,7 @@ function kbDetail(filtered) {
     `<div class="hist-row"><div class="hist-rail"><span class="hist-dot" style="background:${h.dot}"></span><span class="hist-line"></span></div>
       <div class="hist-body"><div class="hist-action"><b style="color:${h.dot}">${esc(h.action)}</b> ${esc(h.detail)}</div>
         <div class="hist-meta">${esc(h.date)} · ${esc(h.sha)}</div></div>
-      <button class="hist-revert" data-act="revert:${esc(h.sha)}">Revert</button></div>`).join('');
+      ${destrBtn('revert:' + h.sha, 'Revert', 'hist-revert')}</div>`).join('');
   const retired = c.status === 'retired';
   return `<div class="kb-detail"><div class="kb-detail-pad">
     <div class="kb-d-head">
@@ -1087,7 +1087,7 @@ async function editCandidate() {
 }
 
 // ---------- event delegation ----------
-const DESTRUCTIVE = new Set(['cardRetire', 'cardRemove', 'reject-noisy']);
+const DESTRUCTIVE = new Set(['cardRetire', 'cardRemove', 'reject-noisy', 'revert']);
 
 function splitAct(act) {
   const i = act.indexOf(':');
@@ -1112,6 +1112,25 @@ async function cardAction(verb, id, okLabel, okDot) {
   state.analytics = null;
   if (verb === 'remove') { state.kbId = null; delete state.cardDetail[id]; }
   else { const d = await loadCard(id); if (d) state.cardDetail[id] = d; else delete state.cardDetail[id]; }
+  await ensure(state.screen);
+  render();
+}
+
+// revertCard restores the open card to its content at a history commit. The
+// server scopes the revert to this one file and records it as a fresh commit,
+// so it is itself undoable from the timeline.
+async function revertCard(sha) {
+  const id = state.kbId;
+  if (!id || !sha) return;
+  const res = await postJSON('/api/cards/revert', { id, sha });
+  if (res && res.ok === false) { showToast(res.note || 'could not revert', COLOR.warning); return; }
+  showToast('Reverted to ' + sha, COLOR.warning);
+  state.cards = null;
+  state.overview = null;
+  state.analytics = null;
+  delete state.cardDetail[id];
+  const d = await loadCard(id);
+  if (d) state.cardDetail[id] = d;
   await ensure(state.screen);
   render();
 }
@@ -1180,7 +1199,7 @@ function handleAction(act) {
     case 'cardRemove': cardAction('remove', state.kbId, 'Removed — recoverable from git', COLOR.danger); return;
     case 'down': cardAction('down', arg, 'Downvoted', COLOR.neutral); return;
     case 'reject-noisy': cardAction('retire', arg, 'Retired (reversible)', COLOR.warning); return;
-    case 'revert': showToast('Not wired — run `git revert ' + (arg || '') + '` in ~/.culi/knowledge', COLOR.neutral); return;
+    case 'revert': revertCard(arg); return;
     case 'setProvider': setLearningProvider(arg); return;
     case 'saveConfig': saveConfig(); return;
     case 'revertConfig': state.settingsDraft = null; state.settings = null; goto('settings'); return;

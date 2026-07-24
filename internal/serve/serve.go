@@ -103,6 +103,7 @@ func Run(ctx context.Context, opt Options) error {
 	mux.HandleFunc("GET /api/cards", s.handleCards)
 	mux.HandleFunc("POST /api/cards/action", s.handleCardAction)
 	mux.HandleFunc("POST /api/cards/edit", s.handleCardEdit)
+	mux.HandleFunc("POST /api/cards/revert", s.handleCardRevert)
 	mux.HandleFunc("GET /api/cards/{id}", s.handleCard)
 	mux.HandleFunc("GET /api/activity/injections", s.handleInjections)
 	mux.HandleFunc("GET /api/activity/runs", s.handleRuns)

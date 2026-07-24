@@ -79,6 +79,21 @@ func TestConsoleUXContracts(t *testing.T) {
 			t.Errorf("effectiveness CSS missing %q", want)
 		}
 	}
+	// Card history Revert must hit a real endpoint, not the old "Not wired" stub.
+	if strings.Contains(js, "Not wired") {
+		t.Error("revert must be wired to /api/cards/revert, not a toast stub")
+	}
+	for _, want := range []string{"async function revertCard", "/api/cards/revert", "'revert'"} {
+		if !strings.Contains(js, want) {
+			t.Errorf("revert wiring missing %q", want)
+		}
+	}
+	// The inline edit form must be styled so Save/Cancel are visible.
+	for _, want := range []string{".edit-btns", ".edit label", ".edit input"} {
+		if !strings.Contains(css, want) {
+			t.Errorf("edit-form CSS missing %q", want)
+		}
+	}
 	for _, want := range []string{"Learning backend", "Codex terminal", "OpenAI API", "setLearningProvider", `data-key="openai_api_key_file"`, `data-act="setProvider:`} {
 		if !strings.Contains(js+seed, want) {
 			t.Errorf("learning settings UI missing %q", want)

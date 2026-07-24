@@ -373,6 +373,46 @@ func (s *server) handleCardEdit(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// handleCardRevert restores one card file to its content at a chosen commit
+// from its KB history timeline, then re-syncs and commits — the "Revert" button
+// on each history row. Scoped to the single card (never `git revert` of the
+// whole multi-file commit), and itself recorded as a new commit so it is
+// reversible in turn (C4). A no-op revert (already at that version) reports so
+// instead of manufacturing an empty commit.
+func (s *server) handleCardRevert(w http.ResponseWriter, r *http.Request) {
+	if !s.guardLocal(w, r) {
+		return
+	}
+	var req struct {
+		ID  string `json:"id"`
+		SHA string `json:"sha"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request body"})
+		return
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	ctx := r.Context()
+	sc, err := s.store.CardByID(ctx, req.ID)
+	if err != nil {
+		s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "card not found"})
+		return
+	}
+	if err := revertCardFile(ctx, s.kdir, filepath.FromSlash(sc.Path), req.SHA); err != nil {
+		s.writeJSON(w, http.StatusOK, map[string]any{"ok": false, "note": err.Error()})
+		return
+	}
+	if _, err := indexer.Sync(ctx, s.store, s.kdir); err != nil {
+		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := knowledge.Commit(s.kdir, "revert: "+sc.ID+" to "+req.SHA); err != nil {
+		log.Printf("serve: commit after revert %s: %v", sc.ID, err)
+	}
+	s.writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // repoInfo describes one watched repo for the manager popup.
 type repoInfo struct {
 	Path   string `json:"path"`

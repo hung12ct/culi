@@ -2,10 +2,51 @@ package serve
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 )
+
+// validSHA reports whether s is a bare git short/long hash. Revert takes the
+// sha as a positional git arg before "--"; rejecting anything non-hex stops a
+// value like "--force" from being read as a flag (exec bypasses the shell, so
+// this is arg-smuggling defense, not shell-injection).
+func validSHA(s string) bool {
+	if len(s) < 4 || len(s) > 40 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// revertCardFile restores a single card file to its state at commit sha, the
+// bounded meaning the KB history "Revert" needs: it touches ONLY relPath, never
+// the other files in a multi-file commit (the import commit alone spans 140
+// cards). `git checkout <sha> -- <path>` fails cleanly when the file didn't
+// exist at sha, so reverting past a card's creation reports an error rather
+// than guessing. The caller re-syncs the index and commits the result, so the
+// change is itself git-recorded and reversible.
+func revertCardFile(ctx context.Context, kdir, relPath, sha string) error {
+	if !validSHA(sha) {
+		return fmt.Errorf("serve: invalid revision %q", sha)
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", kdir, "checkout", sha, "--", relPath)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("serve: reverting %s to %s: %s", relPath, sha, msg)
+	}
+	return nil
+}
 
 // histEntry is one line of a card's git audit trail for the KB detail view.
 type histEntry struct {
