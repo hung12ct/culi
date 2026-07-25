@@ -78,6 +78,8 @@ type overviewPayload struct {
 	Granularity granPayload `json:"granularity"`
 	FailedJobs  []failedJob `json:"failedJobs"`
 	Noisy       []noisyItem `json:"noisy"`
+	NoisyHeader string      `json:"noisyHeader"`
+	NoisyMore   string      `json:"noisyMore"`
 	StaleHeader string      `json:"staleHeader"`
 	StaleMore   string      `json:"staleMore"`
 	Stale       []staleItem `json:"stale"`
@@ -269,13 +271,20 @@ type statsView struct {
 		} `json:"counterfactual"`
 	} `json:"retrieval"`
 	Cards struct {
-		ByType     map[string]int `json:"by_type"`
-		Candidates int            `json:"candidates"`
-		Noisy      []struct {
-			ID    string  `json:"id"`
-			Score float64 `json:"score"`
-		} `json:"noisy"`
-		Stale []string `json:"stale"`
+		ByType        map[string]int `json:"by_type"`
+		Candidates    int            `json:"candidates"`
+		Stale         []string       `json:"stale"`
+		Effectiveness struct {
+			// Noisy = exposed in the injection-log window but never pulled
+			// (or downvoted). The overview's "Noisy cards" panel reads this,
+			// not cards.noisy — the latter is a downvotes-only top-3 that
+			// stays empty until someone clicks Down.
+			Noisy []struct {
+				ID           string  `json:"id"`
+				PullRate     float64 `json:"pull_rate"`
+				WindowTokens int     `json:"window_tokens"`
+			} `json:"noisy"`
+		} `json:"effectiveness"`
 	} `json:"cards"`
 	Learning struct {
 		InboxPending int `json:"inbox_pending"`
@@ -362,12 +371,18 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 		failed = []failedJob{{Kind: "learn run", At: "", Reason: "a queued learn job failed — retry it from the inbox"}}
 	}
 
-	var noisy []noisyItem
-	for i, n := range sv.Cards.Noisy {
+	// Rows arrive sorted pull-rate-then-tokens desc; the top 3 are the loudest
+	// offenders. Score shows the window token cost — the thing being wasted.
+	noisy := make([]noisyItem, 0, 3)
+	for i, n := range sv.Cards.Effectiveness.Noisy {
 		if i >= 3 {
 			break
 		}
-		noisy = append(noisy, noisyItem{ID: n.ID, Short: idToShort[n.ID], Name: n.ID, Score: fmt.Sprintf("%.1f", n.Score)})
+		noisy = append(noisy, noisyItem{ID: n.ID, Short: idToShort[n.ID], Name: n.ID, Score: commas(n.WindowTokens) + " tok"})
+	}
+	noisyMore := ""
+	if n := len(sv.Cards.Effectiveness.Noisy); n > 3 {
+		noisyMore = "+ " + itoa(n-3) + " more"
 	}
 	var stale []staleItem
 	for i, id := range sv.Cards.Stale {
@@ -389,6 +404,8 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 		Granularity: granFromBuckets(sv),
 		FailedJobs:  failed,
 		Noisy:       noisy,
+		NoisyHeader: itoa(len(sv.Cards.Effectiveness.Noisy)) + " injected · never pulled",
+		NoisyMore:   noisyMore,
 		StaleHeader: itoa(len(sv.Cards.Stale)) + " never pulled (30d)",
 		StaleMore:   staleMore,
 		Stale:       stale,

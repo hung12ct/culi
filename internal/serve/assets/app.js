@@ -369,10 +369,10 @@ function screenOverview() {
       ? `<span class="attn-name link" data-act="ovCard:${esc(c.short)}" role="button" tabindex="0" title="Open ${esc(c.name)} in the Knowledge Base">${esc(c.name)}</span>`
       : `<span class="attn-name">${esc(c.name)}</span>`;
     return `<div class="attn-row">${nm}
-      <span class="score-pill">${esc(c.score)}</span>
+      <span class="score-pill" title="Tokens this card cost in the injection window while never being pulled">${esc(c.score)}</span>
       <button class="btn btn-outline" data-act="down:${esc(c.id || '')}">Down</button>
       ${destrBtn('reject-noisy:' + (c.id || ''), 'Retire', 'btn btn-red-outline')}</div>`;
-  }).join('');
+  }).join('') || `<div class="attn-empty">No noisy cards — nothing is being injected repeatedly and left unpulled.</div>`;
   const stale = (o.stale || []).map(c => {
     const link = c.short ? `data-act="ovCard:${esc(c.short)}" role="button" tabindex="0" title="Open ${esc(c.name)} in the Knowledge Base"` : '';
     return `<div class="attn-row ${c.short ? 'link' : ''}" ${link}>
@@ -422,13 +422,14 @@ function screenOverview() {
     </div>
     <div class="ov-row" style="margin-bottom:0">
       <div class="card attn">
-        <div class="attn-head"><div class="attn-title">Noisy cards</div><div class="attn-note">injected a lot · never expanded</div></div>
+        <div class="attn-head"><div class="attn-title">Noisy cards</div><div class="attn-note">${esc(o.noisyHeader || 'injected · never pulled')}</div></div>
         ${noisy}
+        ${o.noisyMore ? `<div class="attn-more">${esc(o.noisyMore)}</div>` : ''}
       </div>
       <div class="card attn">
-        <div class="attn-head"><div class="attn-title">Stale cards</div><a data-act="ovStale">${esc(o.staleHeader || '12 never pulled (30d)')} →</a></div>
-        ${stale}
-        <div class="attn-more link" data-act="ovStale">${esc(o.staleMore || '+ 9 more')} →</div>
+        <div class="attn-head"><div class="attn-title">Stale cards</div><a data-act="ovStale">${esc(o.staleHeader || '0 never pulled (30d)')} →</a></div>
+        ${stale || `<div class="attn-empty">No stale cards — every live card has been injected recently.</div>`}
+        ${o.staleMore ? `<div class="attn-more link" data-act="ovStale">${esc(o.staleMore)} →</div>` : ''}
       </div>
     </div>
   </div>`;

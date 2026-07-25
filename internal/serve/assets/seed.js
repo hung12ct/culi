@@ -19,10 +19,11 @@ const SEED = {
     ],
     granularity: { body: 12, summary: 46, hook: 42 },
     failedJobs: [{ kind: 'learn run', at: '2026-07-20 08:12', reason: 'ollama embed timeout · fell back to keyword' }],
+    noisyHeader: '5 injected · never pulled', noisyMore: '+ 2 more',
     noisy: [
-      { id: 'skills/worktree', name: 'skills/worktree', score: '4.3' },
-      { id: 'rule/go-errwrap', name: 'rule/go-errwrap', score: '3.8' },
-      { id: 'style/commit-msg', name: 'style/commit-msg', score: '3.1' },
+      { id: 'skills/worktree', name: 'skills/worktree', score: '1,240 tok' },
+      { id: 'rule/go-errwrap', name: 'rule/go-errwrap', score: '860 tok' },
+      { id: 'style/commit-msg', name: 'style/commit-msg', score: '512 tok' },
     ],
     staleHeader: '12 never pulled (30d)', staleMore: '+ 9 more',
     stale: [
