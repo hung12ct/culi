@@ -17,18 +17,37 @@ import (
 type Ollama struct {
 	Endpoint string // e.g. http://localhost:11434
 	Model    string // e.g. nomic-embed-text
-	Client   *http.Client
+	// KeepAlive is passed through to Ollama as the model's residency window,
+	// refreshed on every call. Ollama unloads an idle model after ~5min by
+	// default, and the cold reload costs seconds — far past the hot path's
+	// 100ms embed budget, so the retrieve breaker trips and the whole cosine
+	// arm drops out for its cooldown. Keeping the model resident is what makes
+	// hybrid retrieval actually available between prompts. "" omits the field
+	// (server default).
+	KeepAlive string
+	Client    *http.Client
 }
 
-// NewOllama builds an embedder for endpoint/model.
-func NewOllama(endpoint, model string) *Ollama {
+// NewOllama builds an embedder for endpoint/model. keepAlive is any duration
+// string Ollama accepts ("30m", "-1" for never unload); "" leaves it to the
+// server.
+func NewOllama(endpoint, model, keepAlive string) *Ollama {
 	return &Ollama{
-		Endpoint: strings.TrimRight(endpoint, "/"),
-		Model:    model,
+		Endpoint:  strings.TrimRight(endpoint, "/"),
+		Model:     model,
+		KeepAlive: keepAlive,
 		// Transport-level dial timeout so a firewalled endpoint fails fast even
 		// under a generous ctx; per-call deadlines still come from ctx.
 		Client: &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// embedReq is the /api/embed request body. A struct rather than a map keeps
+// the hot-path marshal allocation-free of interface boxing.
+type embedReq struct {
+	Model     string   `json:"model"`
+	Input     []string `json:"input"`
+	KeepAlive string   `json:"keep_alive,omitempty"`
 }
 
 // Embed embeds texts in one batched request. Every returned vector is unit
@@ -37,7 +56,7 @@ func (o *Ollama) Embed(ctx context.Context, texts []string) ([][]float32, error)
 	if len(texts) == 0 {
 		return nil, nil
 	}
-	body, err := json.Marshal(map[string]any{"model": o.Model, "input": texts})
+	body, err := json.Marshal(embedReq{Model: o.Model, Input: texts, KeepAlive: o.KeepAlive})
 	if err != nil {
 		return nil, fmt.Errorf("embed: marshaling request: %w", err)
 	}

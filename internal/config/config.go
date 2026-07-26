@@ -103,6 +103,12 @@ type ImportConfig struct {
 type OllamaConfig struct {
 	Endpoint string `yaml:"endpoint"`
 	Model    string `yaml:"model"`
+	// KeepAlive is how long Ollama keeps the embedding model resident after a
+	// call. The default unloads an idle model in ~5min, and the cold reload
+	// blows the hot path's 100ms embed budget — three of those trip the
+	// retrieve breaker and drop the cosine arm entirely. "-1" never unloads;
+	// "" defers to the server.
+	KeepAlive string `yaml:"keep_alive"`
 }
 
 // Defaults are deliberately conservative: the packer fills to ~90% of budget,
@@ -112,14 +118,18 @@ const (
 	defaultBaselineBudget = 1200
 	defaultOllamaEndpoint = "http://localhost:11434"
 	defaultOllamaModel    = "nomic-embed-text"
-	defaultMergeModel     = "claude-sonnet-5"
-	defaultCheapModel     = "claude-haiku-4-5"
-	defaultStrongModel    = "claude-sonnet-5"
-	defaultDailyUSDCap    = 0.50
-	defaultDailyCallCap   = 40
-	defaultCandidateTTL   = 30 // days a candidate may sit unreinforced
-	defaultMaxJobsPerRun  = 50 // newest transcripts mined per `culi learn` run
-	defaultConfirmAt      = 2  // observations that auto-confirm a mined candidate
+	// 30m covers the gaps in a working session (a build, a meeting) at the
+	// cost of ~270MB resident for nomic-embed-text. Users who want the cosine
+	// arm never to drop out can set "-1".
+	defaultOllamaKeepAlive = "30m"
+	defaultMergeModel      = "claude-sonnet-5"
+	defaultCheapModel      = "claude-haiku-4-5"
+	defaultStrongModel     = "claude-sonnet-5"
+	defaultDailyUSDCap     = 0.50
+	defaultDailyCallCap    = 40
+	defaultCandidateTTL    = 30 // days a candidate may sit unreinforced
+	defaultMaxJobsPerRun   = 50 // newest transcripts mined per `culi learn` run
+	defaultConfirmAt       = 2  // observations that auto-confirm a mined candidate
 )
 
 // RecommendedLearnModels returns provider-appropriate starting models for the
@@ -208,6 +218,9 @@ func Load(base string) (Config, error) {
 	}
 	if cfg.Ollama.Model == "" {
 		cfg.Ollama.Model = defaultOllamaModel
+	}
+	if cfg.Ollama.KeepAlive == "" {
+		cfg.Ollama.KeepAlive = defaultOllamaKeepAlive
 	}
 	if cfg.Import.Provider == "" {
 		cfg.Import.Provider = "auto"

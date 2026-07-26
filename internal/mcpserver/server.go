@@ -46,7 +46,7 @@ func New(ctx context.Context, base string) (*Server, error) {
 		base:  base,
 		cfg:   cfg,
 		store: s,
-		emb:   embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model),
+		emb:   embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive),
 	}, nil
 }
 

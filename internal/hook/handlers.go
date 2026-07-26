@@ -67,7 +67,7 @@ func handlePrompt(ctx context.Context, base string, in Input) (string, error) {
 	sc := retrieve.DetectScope(in.CWD)
 	r := &retrieve.Retriever{
 		Store:    s,
-		Embedder: embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model),
+		Embedder: embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive),
 		Model:    cfg.Ollama.Model,
 	}
 	cands, err := r.Retrieve(ctx, gate.Query, sc)
@@ -120,7 +120,7 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 	// Vectors for new/changed cards, bounded and best-effort: a dead Ollama
 	// must never delay session start (C1) — BM25 covers the gap.
 	ectx, cancel := context.WithTimeout(ctx, sessionStartEmbedBudget)
-	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model)
+	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive)
 	if _, err := indexer.EmbedMissing(ectx, s, e, cfg.Ollama.Model); err != nil {
 		logf(base, "session-start: embed: %v", err) // non-fatal
 	}

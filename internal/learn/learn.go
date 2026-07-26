@@ -121,7 +121,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 	}
 	defer s.Close()
 
-	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model)
+	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive)
 	miner := &mine.Miner{
 		Base: base, Store: s, Tier: tier,
 		Emb: e, EmbModel: cfg.Ollama.Model, ConfirmAt: cfg.Learn.ConfirmAt, Logf: logf,

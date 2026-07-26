@@ -70,7 +70,7 @@ func TestOllamaEmbed(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	o := NewOllama(srv.URL, "test-model")
+	o := NewOllama(srv.URL, "test-model", "")
 	vecs, err := o.Embed(context.Background(), []string{"a", "b"})
 	if err != nil {
 		t.Fatalf("Embed: %v", err)
@@ -89,7 +89,7 @@ func TestOllamaEmbedErrors(t *testing.T) {
 		http.Error(w, "model not found", http.StatusNotFound)
 	}))
 	defer srv.Close()
-	o := NewOllama(srv.URL, "missing")
+	o := NewOllama(srv.URL, "missing", "")
 	if _, err := o.Embed(context.Background(), []string{"x"}); err == nil {
 		t.Fatal("want error on non-200")
 	}
@@ -102,12 +102,47 @@ func TestOllamaEmbedErrors(t *testing.T) {
 	}
 }
 
+// keep_alive keeps the model resident between prompts; without it Ollama
+// unloads an idle model and the cold reload blows the hot path's embed budget.
+// Empty must omit the field entirely so the server default still applies.
+func TestOllamaKeepAlive(t *testing.T) {
+	for _, tc := range []struct{ keepAlive, want string }{
+		{"30m", "30m"},
+		{"-1", "-1"},
+		{"", ""}, // omitempty ⇒ absent from the payload
+	} {
+		var got string
+		var present bool
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decoding request: %v", err)
+			}
+			v, ok := req["keep_alive"]
+			present = ok
+			got, _ = v.(string)
+			json.NewEncoder(w).Encode(map[string]any{"embeddings": [][]float32{{1, 0}}})
+		}))
+		o := NewOllama(srv.URL, "m", tc.keepAlive)
+		if _, err := o.Embed(context.Background(), []string{"x"}); err != nil {
+			t.Fatalf("Embed(%q): %v", tc.keepAlive, err)
+		}
+		srv.Close()
+		if tc.want == "" && present {
+			t.Errorf("keepAlive %q: field should be omitted, got %q", tc.keepAlive, got)
+		}
+		if got != tc.want {
+			t.Errorf("keepAlive %q: sent keep_alive=%q, want %q", tc.keepAlive, got, tc.want)
+		}
+	}
+}
+
 func TestOllamaCountMismatch(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"embeddings": [][]float32{{1}}})
 	}))
 	defer srv.Close()
-	o := NewOllama(srv.URL, "m")
+	o := NewOllama(srv.URL, "m", "")
 	if _, err := o.Embed(context.Background(), []string{"a", "b"}); err == nil {
 		t.Fatal("want error when embedding count mismatches input count")
 	}

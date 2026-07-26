@@ -68,7 +68,7 @@ func Query(args []string) error {
 	t2 := time.Now()
 	r := &retrieve.Retriever{
 		Store:    s,
-		Embedder: embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model),
+		Embedder: embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive),
 		Model:    cfg.Ollama.Model,
 	}
 	cands, err := r.Retrieve(ctx, gate.Query, sc)

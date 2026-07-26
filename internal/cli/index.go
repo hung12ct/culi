@@ -54,7 +54,7 @@ func Index(args []string) error {
 	if *noEmbed {
 		return nil
 	}
-	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model)
+	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive)
 	n, err := indexer.EmbedMissing(ctx, s, e, cfg.Ollama.Model)
 	if err != nil {
 		fmt.Printf("embeddings: %d done, then skipped — %v (BM25-only retrieval until Ollama is back)\n", n, err)
