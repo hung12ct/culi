@@ -47,6 +47,7 @@ type Summary struct {
 	Reinforced  []string
 	Confirmed   []string
 	Retired     []string
+	Attributed  int // cards credited for observed use (usage attribution)
 	StyleObs    int
 	Style       style.Result    // pipeline B synthesis, when it fired
 	Patterns    patterns.Result // pipeline D branch index
@@ -195,6 +196,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		sum.Reinforced = append(sum.Reinforced, res.Reinforced...)
 		sum.Confirmed = append(sum.Confirmed, res.Confirmed...)
 		sum.Retired = append(sum.Retired, res.Retired...)
+		sum.Attributed += res.Attributed
 		sum.StyleObs += res.StyleObs
 		sum.Notes = append(sum.Notes, res.Notes...)
 		return false

@@ -59,6 +59,7 @@ type Result struct {
 	Reinforced []string // existing card IDs bumped
 	Confirmed  []string // cards that crossed the 2-observation gate
 	Retired    []string // superseded cards retired on confirm
+	Attributed int      // cards credited for observed use this session
 	StyleObs   int
 	Notes      []string
 	Usage      llmgen.Usage
@@ -93,6 +94,18 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 		res.Notes = append(res.Notes, "skipped culi's own mining call (self-ingestion guard)")
 		return res, next, nil
 	}
+	// Usage attribution runs before the window check: a session can be clean of
+	// lessons and still have used its injected cards. Final jobs only (one
+	// SessionEnd per session), re-read from the start so a card is credited at
+	// most once no matter how many times Stop refreshed the job mid-session.
+	if job.IsFinal() {
+		if n, err := m.attributeSession(ctx, job); err != nil {
+			res.Notes = append(res.Notes, err.Error()) // never fail a run over a nudge
+		} else if n > 0 {
+			res.Attributed = n
+		}
+	}
+
 	wins := transcript.Extract(entries)
 	res.Windows = len(wins)
 	if len(wins) == 0 {

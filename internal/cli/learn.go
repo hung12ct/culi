@@ -102,6 +102,9 @@ func Learn(args []string) error {
 	for _, id := range sum.Retired {
 		logf("retired    %s (superseded)", id)
 	}
+	if sum.Attributed > 0 {
+		logf("usage credited: %d card(s) whose terms showed up in the replies", sum.Attributed)
+	}
 	if sum.StyleObs > 0 {
 		logf("style observations: +%d (synthesized periodically)", sum.StyleObs)
 	}

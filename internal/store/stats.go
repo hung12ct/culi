@@ -117,6 +117,31 @@ func (s *Store) UtilityMultipliers(ctx context.Context) (map[string]float64, err
 	return out, rows.Err()
 }
 
+// SessionContentCards lists the cards whose actual content reached the model
+// this session — summary or body granularity, never bare pointers. It is the
+// candidate set for usage attribution: only a card the model could read can be
+// credited for having been used. Pointers keep the opposite contract (expand
+// or be penalized, see PenalizeAbandonedPointers), so excluding them here
+// prevents one line of teaser text earning the same credit as a full body.
+func (s *Store) SessionContentCards(ctx context.Context, sessionID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT card_id FROM injections
+		WHERE session_id = ? AND granularity != 'hook'`, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("store: listing session content cards: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("store: scanning session content card: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // PenalizeAbandonedPointers applies the −0.5-equivalent nudge (0.1 downvote
 // events × weight 5) to cards injected at hook granularity this session and
 // never expanded. Only pointers earn negative inference: pushed bodies are
