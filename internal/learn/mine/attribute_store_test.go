@@ -42,6 +42,17 @@ func attribStore(t *testing.T, granularity string) *store.Store {
 	return s
 }
 
+// injectedIn resolves the session's creditable cards the way attributeSession
+// does, so the tests exercise the same selection.
+func injectedIn(t *testing.T, s *store.Store, session string) []string {
+	t.Helper()
+	ids, err := s.SessionContentCards(context.Background(), session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ids
+}
+
 func referencedCount(t *testing.T, s *store.Store, id string) float64 {
 	t.Helper()
 	stats, err := s.AllCardStats(context.Background(), time.Now().UTC())
@@ -63,7 +74,7 @@ func TestAttributeUsageWritesFeedback(t *testing.T) {
 	m := &Miner{Store: s}
 	ctx := context.Background()
 
-	n, err := m.attributeUsage(ctx, "s1", usingCard("I will not tag a release without the matching changelog entry first"))
+	n, err := m.attributeUsage(ctx, injectedIn(t, s, "s1"), usingCard("I will not tag a release without the matching changelog entry first"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +93,7 @@ func TestAttributeUsageIgnoresPointerOnlyCards(t *testing.T) {
 	s := attribStore(t, store.GranHook)
 	m := &Miner{Store: s}
 
-	n, err := m.attributeUsage(context.Background(), "s1",
+	n, err := m.attributeUsage(context.Background(), injectedIn(t, s, "s1"),
 		usingCard("I will not tag a release without the matching changelog entry first"))
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +107,7 @@ func TestAttributeUsageNoMatchNoCredit(t *testing.T) {
 	s := attribStore(t, store.GranBody)
 	m := &Miner{Store: s}
 
-	n, err := m.attributeUsage(context.Background(), "s1",
+	n, err := m.attributeUsage(context.Background(), injectedIn(t, s, "s1"),
 		usingCard("sure, I'll cut the release now and push the tag"))
 	if err != nil {
 		t.Fatal(err)
@@ -114,12 +125,67 @@ func TestAttributeUsageScopedToSession(t *testing.T) {
 	s := attribStore(t, store.GranBody)
 	m := &Miner{Store: s}
 
-	n, err := m.attributeUsage(context.Background(), "other-session",
+	n, err := m.attributeUsage(context.Background(), injectedIn(t, s, "other-session"),
 		usingCard("I will not tag a release without the matching changelog entry first"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {
 		t.Fatalf("credited %d cards from a foreign session, want 0", n)
+	}
+}
+
+// The defect this pins: a job labelled "session-end" is not once-per-session.
+// The Codex rollout scanner stamps that trigger on every rescan of a growing
+// rollout (cli/learn.go), and a resumed Claude session reaches SessionEnd
+// twice. Since credit is additive, only a persisted claim can stop the second
+// pass re-crediting the whole session from offset 0.
+func TestClaimAttributionIsOncePerSession(t *testing.T) {
+	s := attribStore(t, store.GranBody)
+	ctx := context.Background()
+
+	first, err := s.ClaimAttribution(ctx, "s1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first {
+		t.Fatal("first claim should win")
+	}
+	for i := range 3 {
+		again, err := s.ClaimAttribution(ctx, "s1", time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if again {
+			t.Fatalf("claim %d re-won; session would be credited twice", i+2)
+		}
+	}
+	// A different session is unaffected.
+	other, err := s.ClaimAttribution(ctx, "s2", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !other {
+		t.Error("a distinct session should still be claimable")
+	}
+}
+
+// The claim must not disturb the gate's novelty state living in the same row.
+func TestClaimAttributionPreservesLastPrompt(t *testing.T) {
+	s := attribStore(t, store.GranBody)
+	ctx := context.Background()
+
+	if _, err := s.SwapLastPrompt(ctx, "s1", "the original prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimAttribution(ctx, "s1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	prev, err := s.SwapLastPrompt(ctx, "s1", "next prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev != "the original prompt" {
+		t.Errorf("last_prompt = %q, want %q — claim clobbered gate state", prev, "the original prompt")
 	}
 }

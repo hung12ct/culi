@@ -140,8 +140,6 @@ func TestShingleNormalizesFormatting(t *testing.T) {
 	}
 }
 
-// Tool output is excluded: a card's wording in a grep result is evidence about
-// the repo, not about the card.
 // Phrases must not span message boundaries: two adjacent replies that happen
 // to abut cannot manufacture a phrase neither of them contains.
 func TestShinglesDoNotSpanEntries(t *testing.T) {

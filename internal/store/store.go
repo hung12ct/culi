@@ -21,7 +21,12 @@ import (
 // repo each injection happened in.
 // v3: injections gained a `harness` column so attribution (claude vs codex) is
 // authoritative rather than parsed out of the session_id prefix.
-const schemaVersion = 3
+// v4: session_state gained `attributed_at` so usage attribution credits a
+// session at most once. A job labelled session-end is NOT once-per-session —
+// the Codex rollout scanner stamps that trigger on every rescan of a growing
+// rollout, and a resumed Claude session ends twice — so the guard has to be
+// state, not the job label.
+const schemaVersion = 4
 
 var schemaMigrations = map[int][]string{
 	1: {
@@ -30,6 +35,9 @@ var schemaMigrations = map[int][]string{
 	2: {
 		"ALTER TABLE injections ADD COLUMN harness TEXT NOT NULL DEFAULT 'claude'",
 		"UPDATE injections SET harness = 'codex' WHERE session_id LIKE 'codex:%'",
+	},
+	3: {
+		"ALTER TABLE session_state ADD COLUMN attributed_at TEXT NOT NULL DEFAULT ''",
 	},
 }
 
@@ -213,9 +221,10 @@ CREATE INDEX idx_inj_session ON injections(session_id, card_id);
 
 -- Small per-session scratch used by the gate (novelty check).
 CREATE TABLE session_state (
-  session_id  TEXT PRIMARY KEY,
-  last_prompt TEXT NOT NULL DEFAULT '',
-  updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+  session_id    TEXT PRIMARY KEY,
+  last_prompt   TEXT NOT NULL DEFAULT '',
+  updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  attributed_at TEXT NOT NULL DEFAULT ''  -- set once, when usage attribution has credited this session
 );
 
 CREATE TABLE card_stats (

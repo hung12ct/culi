@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/learn/codexroll"
@@ -29,8 +30,15 @@ import (
 // term rarity against the card corpus marks ordinary English ("also", "keeps",
 // "development") as distinctive, because card summaries are short and
 // technical, and it credited over half of all injected cards on words like
-// those. Phrase reuse is far stricter — a shared four-word sequence of prose is
+// those. Phrase reuse is far stricter — a shared five-word sequence of prose is
 // hard to produce by coincidence.
+//
+// Two known limits, both erring toward missing credit rather than inventing it:
+// words are folded letter/digit runs, so a CJK session produces no phrases and
+// is never attributed; and cards imported from a repo's CLAUDE.md/AGENTS.md
+// share prose with text the harness already loads every turn, so a reply
+// restating it credits the card even though the injection was not the source —
+// a bias toward exactly the duplicated cards culi exists to collapse.
 const (
 	// shingleN is the phrase length, calibrated against real sessions. Four
 	// words still collides on stock English — "starting a new feature" appears
@@ -54,27 +62,48 @@ const (
 	attributionCredit = 0.5
 )
 
-// attributeSession re-reads a finished session's whole transcript and credits
-// the cards it appears to have used. Reading from offset 0 (rather than the
-// mining cursor) is what makes the credit idempotent per session: mining
-// advances its cursor as Stop refreshes the job, so cursor-relative entries
-// would only ever show the tail, and a card injected early would be invisible.
-// One extra parse per session, off the hot path.
-func (m *Miner) attributeSession(ctx context.Context, job queue.Job) (int, error) {
-	var entries []transcript.Entry
-	var err error
-	switch job.EffectiveSource() {
-	case harness.Claude:
-		entries, _, err = transcript.ReadFrom(job.TranscriptPath, 0)
-	case harness.Codex:
-		entries, _, err = codexroll.ReadFrom(job.TranscriptPath, 0)
-	default:
-		return 0, nil
-	}
+// attributeSession credits the cards a finished session appears to have used.
+//
+// Ordering is deliberate, cheapest guard first: a full transcript parse costs
+// ~385ms on a 33MB session, so it must not run for sessions that cannot be
+// credited (nothing injected, or already credited). The claim is what makes
+// this idempotent — see store.ClaimAttribution; the job's "session-end" label
+// is not once-per-session.
+//
+// Matching needs the whole session, not the mining cursor's tail, or a card
+// injected early would be invisible. When the cursor never moved, MineSession's
+// entries already are the whole session, so they are reused instead of
+// re-parsed.
+func (m *Miner) attributeSession(ctx context.Context, job queue.Job, cur queue.Cursor, entries []transcript.Entry) (int, error) {
+	injected, err := m.Store.SessionContentCards(ctx, job.SessionID)
 	if err != nil {
-		return 0, fmt.Errorf("mine: re-reading transcript for attribution: %w", err)
+		return 0, fmt.Errorf("mine: attributing usage: %w", err)
 	}
-	return m.attributeUsage(ctx, job.SessionID, entries)
+	if len(injected) == 0 {
+		return 0, nil // nothing whose content reached the model
+	}
+	claimed, err := m.Store.ClaimAttribution(ctx, job.SessionID, time.Now())
+	if err != nil {
+		return 0, err
+	}
+	if !claimed {
+		return 0, nil // already credited by an earlier final job
+	}
+
+	if cur.Offset != 0 {
+		switch job.EffectiveSource() {
+		case harness.Claude:
+			entries, _, err = transcript.ReadFrom(job.TranscriptPath, 0)
+		case harness.Codex:
+			entries, _, err = codexroll.ReadFrom(job.TranscriptPath, 0)
+		default:
+			return 0, nil
+		}
+		if err != nil {
+			return 0, fmt.Errorf("mine: re-reading transcript for attribution: %w", err)
+		}
+	}
+	return m.attributeUsage(ctx, injected, entries)
 }
 
 // attributeUsage credits cards whose prose reappears in the assistant's
@@ -91,15 +120,8 @@ func (m *Miner) attributeSession(ctx context.Context, job queue.Job) (int, error
 //     "phrase" that is about the repo, not about the card.
 //
 // Best-effort: attribution is a nudge to ranking, never a reason to fail a run.
-func (m *Miner) attributeUsage(ctx context.Context, sessionID string, entries []transcript.Entry) (int, error) {
-	if sessionID == "" || len(entries) == 0 {
-		return 0, nil
-	}
-	injected, err := m.Store.SessionContentCards(ctx, sessionID)
-	if err != nil {
-		return 0, fmt.Errorf("mine: attributing usage: %w", err)
-	}
-	if len(injected) == 0 {
+func (m *Miner) attributeUsage(ctx context.Context, injected []string, entries []transcript.Entry) (int, error) {
+	if len(injected) == 0 || len(entries) == 0 {
 		return 0, nil
 	}
 

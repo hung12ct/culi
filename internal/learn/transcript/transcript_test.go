@@ -230,3 +230,42 @@ func TestIsCorrectionBoundaries(t *testing.T) {
 		}
 	}
 }
+
+// Claude Code records culi's own hook injection as a top-level
+// type:"attachment" line (attachment.type = hook_additional_context), not as a
+// user message. Usage attribution in internal/learn/mine depends on that:
+// it credits a card when the card's prose appears in an assistant reply but
+// was NOT supplied by the user. If injected <ctx> text ever started parsing as
+// a user turn, every injected card's own phrases would land in the
+// "user supplied it" set and the whole signal would silently drop to zero.
+//
+// The transcript format is undocumented and shifts between versions (see the
+// package doc), so pin it here rather than discovering it as a dead metric.
+func TestHookInjectionIsNotAUserTurn(t *testing.T) {
+	const injected = "never tag a release without the matching changelog entry"
+	path := writeTranscript(t,
+		`{"type":"attachment","attachment":{"type":"hook_additional_context","additionalContext":"<ctx>[rule] `+injected+`</ctx>"}}`,
+		userText(t, "cut a release"),
+		assistantText(t, injected),
+	)
+
+	entries, _, err := ReadFrom(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Role == "user" && strings.Contains(e.Text, injected) {
+			t.Fatalf("hook-injected context parsed as a user turn (%q) — usage attribution "+
+				"would treat every injected card as user-supplied and never credit anything", e.Text)
+		}
+	}
+	var sawAssistant bool
+	for _, e := range entries {
+		if e.Role == "assistant" && strings.Contains(e.Text, injected) {
+			sawAssistant = true
+		}
+	}
+	if !sawAssistant {
+		t.Error("assistant turn missing — fixture no longer exercises the property")
+	}
+}

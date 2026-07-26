@@ -142,6 +142,33 @@ func (s *Store) SessionContentCards(ctx context.Context, sessionID string) ([]st
 	return ids, rows.Err()
 }
 
+// ClaimAttribution reserves the right to credit this session's card usage,
+// returning true exactly once per session. Usage credit is additive, so it must
+// not be applied twice — and the job label cannot be trusted for that: the
+// Codex rollout scanner stamps trigger "session-end" on every rescan of a
+// growing rollout, and a resumed Claude session reaches SessionEnd more than
+// once. Both would otherwise re-credit the whole session from offset 0.
+//
+// One statement, so two workers racing the same session cannot both win: the
+// conflicting UPDATE is skipped when the row was already claimed, leaving
+// RowsAffected at 0. The marker rides in session_state, which PruneStale
+// already bounds to the retention window.
+func (s *Store) ClaimAttribution(ctx context.Context, sessionID string, now time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO session_state (session_id, attributed_at) VALUES (?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET attributed_at = excluded.attributed_at
+		WHERE session_state.attributed_at = ''`,
+		sessionID, now.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return false, fmt.Errorf("store: claiming attribution for %s: %w", sessionID, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: claiming attribution for %s: %w", sessionID, err)
+	}
+	return n > 0, nil
+}
+
 // PenalizeAbandonedPointers applies the −0.5-equivalent nudge (0.1 downvote
 // events × weight 5) to cards injected at hook granularity this session and
 // never expanded. Only pointers earn negative inference: pushed bodies are

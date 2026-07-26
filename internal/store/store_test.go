@@ -8,6 +8,7 @@ import (
 
 	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/knowledge"
+	"time"
 )
 
 func openTest(t *testing.T) *Store {
@@ -211,6 +212,7 @@ func TestMigrateV2PreservesRuntimeData(t *testing.T) {
 		SELECT id,session_id,ts,event,card_id,granularity,prompt_hash,tokens,cwd FROM injections_v3;
 		DROP TABLE injections_v3;
 		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
+		ALTER TABLE session_state DROP COLUMN attributed_at;
 		PRAGMA user_version = 2;
 	`); err != nil {
 		t.Fatal(err)
@@ -279,6 +281,7 @@ func TestMigrateV1AddsRuntimeAttribution(t *testing.T) {
 		SELECT id,session_id,ts,event,card_id,granularity,prompt_hash,tokens FROM injections_v3;
 		DROP TABLE injections_v3;
 		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
+		ALTER TABLE session_state DROP COLUMN attributed_at;
 		PRAGMA user_version = 1;
 	`); err != nil {
 		t.Fatal(err)
@@ -333,5 +336,74 @@ func TestNewerSchemaIsRejectedWithoutDataLoss(t *testing.T) {
 	}
 	if cards != 1 {
 		t.Fatalf("newer-schema check kept %d cards, want 1", cards)
+	}
+}
+
+// The v4 bump adds session_state.attributed_at. Schema bumps in culi preserve
+// runtime history via forward migration rather than drop-and-rebuild, so the
+// migration must carry existing session state, injections and card stats
+// across untouched — losing them is unrecoverable (they are not in any file).
+func TestMigrateV3PreservesRuntimeData(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "index.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordInjections(ctx, "s1", "user-prompt-submit", "h", "/repo", harness.Claude,
+		[]InjectionRecord{{CardID: "rules/a", Granularity: "body", Tokens: 42}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SwapLastPrompt(ctx, "s1", "remembered prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddFeedback(ctx, "rules/a", FeedbackReferenced, 0.5); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate a pre-v4 database.
+	if _, err := s.db.ExecContext(ctx, `
+		ALTER TABLE session_state DROP COLUMN attributed_at;
+		PRAGMA user_version = 3;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen v3 store: %v", err)
+	}
+	defer s2.Close()
+
+	prev, err := s2.SwapLastPrompt(ctx, "s1", "next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev != "remembered prompt" {
+		t.Errorf("last_prompt = %q, want %q — migration lost session state", prev, "remembered prompt")
+	}
+	usage, err := s2.CardWindowUsage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage["rules/a"].Tokens != 42 {
+		t.Errorf("injection history lost: %+v", usage["rules/a"])
+	}
+	stats, err := s2.AllCardStats(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats["rules/a"].Referenced <= 0 {
+		t.Errorf("card stats lost: %+v", stats["rules/a"])
+	}
+	// The new column exists and starts unclaimed.
+	claimed, err := s2.ClaimAttribution(ctx, "s1", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
+		t.Error("migrated row should still be claimable")
 	}
 }

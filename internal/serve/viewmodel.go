@@ -371,8 +371,9 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 		failed = []failedJob{{Kind: "learn run", At: "", Reason: "a queued learn job failed — retry it from the inbox"}}
 	}
 
-	// Rows arrive sorted pull-rate-then-tokens desc; the top 3 are the loudest
-	// offenders. Score shows the window token cost — the thing being wasted.
+	// Rows arrive sorted pull-rate-then-tokens desc, so the top 3 are the
+	// worst-scoring rather than strictly the most expensive. Score shows the
+	// window token cost — the thing being wasted.
 	noisy := make([]noisyItem, 0, 3)
 	for i, n := range sv.Cards.Effectiveness.Noisy {
 		if i >= 3 {

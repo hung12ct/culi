@@ -98,7 +98,7 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 	res.Windows = len(wins)
 	if len(wins) == 0 {
 		// A session can be clean of lessons and still have used its cards.
-		m.attribute(ctx, job, &res)
+		m.attribute(ctx, job, cur, entries, &res)
 		return res, next, nil // clean session: free
 	}
 	if m.Tier == nil {
@@ -148,7 +148,7 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 	if werr != nil {
 		return res, cur, werr
 	}
-	m.attribute(ctx, job, &res)
+	m.attribute(ctx, job, cur, entries, &res)
 	return res, next, nil
 }
 
@@ -156,17 +156,25 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 // return `next` — i.e. where the caller will consume the job. Attribution must
 // not run before the LLM call: a capped or backend-down mine returns the old
 // cursor and leaves the job queued for a later run, so crediting early would
-// add another 0.5 to the same cards on every retry.
-func (m *Miner) attribute(ctx context.Context, job queue.Job, res *Result) {
+// add another 0.5 to the same cards on every retry. Repeat *final* jobs are a
+// separate hazard handled by store.ClaimAttribution, not by IsFinal.
+//
+// Runs under WriteMu like every other store write here: AddFeedback is a
+// read-modify-write, and a parallel drain must not interleave it with another
+// worker's transaction.
+func (m *Miner) attribute(ctx context.Context, job queue.Job, cur queue.Cursor, entries []transcript.Entry, res *Result) {
 	if !job.IsFinal() {
-		return // one SessionEnd per session; Stop refreshes must not re-credit
+		return // Stop refreshes are mid-session; only a final job can settle it
 	}
-	n, err := m.attributeSession(ctx, job)
+	if m.WriteMu != nil {
+		m.WriteMu.Lock()
+		defer m.WriteMu.Unlock()
+	}
+	n, err := m.attributeSession(ctx, job, cur, entries)
+	res.Attributed = n // credits already written survive a later error
 	if err != nil {
 		res.Notes = append(res.Notes, err.Error()) // never fail a run over a nudge
-		return
 	}
-	res.Attributed = n
 }
 
 // apply lands the model output: dedup, lifecycle, card writes, style ledger.
