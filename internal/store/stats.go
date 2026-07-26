@@ -154,17 +154,35 @@ func (s *Store) SessionContentCards(ctx context.Context, sessionID string) ([]st
 // RowsAffected at 0. The marker rides in session_state, which PruneStale
 // already bounds to the retention window.
 func (s *Store) ClaimAttribution(ctx context.Context, sessionID string, now time.Time) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO session_state (session_id, attributed_at) VALUES (?, ?)
-		ON CONFLICT(session_id) DO UPDATE SET attributed_at = excluded.attributed_at
-		WHERE session_state.attributed_at = ''`,
+	return s.claimSessionOnce(ctx, sessionID, colAttributedAt, now)
+}
+
+// Once-per-session marker columns on session_state. Attribution and the
+// pointer penalty need separate markers: they are applied by different
+// processes at different times (the learn worker after mining vs. the hook at
+// session end), so a shared marker would let whichever ran first silently
+// cancel the other.
+const (
+	colAttributedAt = "attributed_at"
+	colPenalizedAt  = "penalized_at"
+)
+
+// claimSessionOnce sets a session_state marker column, returning true only for
+// the caller that set it. column comes from the constants above and is never
+// caller-supplied — SQLite cannot parameterize identifiers, so this must stay
+// closed to outside input.
+func (s *Store) claimSessionOnce(ctx context.Context, sessionID, column string, now time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, fmt.Sprintf(`
+		INSERT INTO session_state (session_id, %[1]s) VALUES (?, ?)
+		ON CONFLICT(session_id) DO UPDATE SET %[1]s = excluded.%[1]s
+		WHERE session_state.%[1]s = ''`, column),
 		sessionID, now.UTC().Format(time.RFC3339Nano))
 	if err != nil {
-		return false, fmt.Errorf("store: claiming attribution for %s: %w", sessionID, err)
+		return false, fmt.Errorf("store: claiming %s for %s: %w", column, sessionID, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("store: claiming attribution for %s: %w", sessionID, err)
+		return false, fmt.Errorf("store: claiming %s for %s: %w", column, sessionID, err)
 	}
 	return n > 0, nil
 }
@@ -172,8 +190,28 @@ func (s *Store) ClaimAttribution(ctx context.Context, sessionID string, now time
 // PenalizeAbandonedPointers applies the −0.5-equivalent nudge (0.1 downvote
 // events × weight 5) to cards injected at hook granularity this session and
 // never expanded. Only pointers earn negative inference: pushed bodies are
-// unobservable (plan §9). Runs at session end, off the hot path.
+// unobservable (plan §9). Runs at session end, off the per-prompt hot path.
+//
+// Claims the session first so the penalty lands at most once. SessionEnd is
+// not once-per-session — a resumed Claude session reaches it again on the same
+// session_id — and the penalty is additive, so a second pass would push the
+// same pointers toward "noisy" twice as fast as their evidence warrants.
+// Claiming inside keeps the invariant with the operation rather than relying
+// on every caller to remember it.
+//
+// The trade this makes: pointers injected *after* a resumed session's first
+// end are never penalized. That is the deliberate direction — negative
+// inference here is already conservative (see ClassifyEffectiveness: silence
+// alone never marks a card noisy), so under-penalizing costs a slower verdict
+// while over-penalizing manufactures one the evidence does not support.
 func (s *Store) PenalizeAbandonedPointers(ctx context.Context, sessionID string) error {
+	claimed, err := s.claimSessionOnce(ctx, sessionID, colPenalizedAt, time.Now())
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return nil // already settled by an earlier session end
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT DISTINCT card_id FROM injections
 		WHERE session_id = ? AND granularity = 'hook'

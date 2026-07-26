@@ -26,7 +26,11 @@ import (
 // the Codex rollout scanner stamps that trigger on every rescan of a growing
 // rollout, and a resumed Claude session ends twice — so the guard has to be
 // state, not the job label.
-const schemaVersion = 4
+// v5: session_state gained `penalized_at`, the same guard for the
+// abandoned-pointer penalty, which a resumed session would otherwise apply
+// twice. Separate from attributed_at because the two are applied by different
+// processes at different times.
+const schemaVersion = 5
 
 var schemaMigrations = map[int][]string{
 	1: {
@@ -38,6 +42,9 @@ var schemaMigrations = map[int][]string{
 	},
 	3: {
 		"ALTER TABLE session_state ADD COLUMN attributed_at TEXT NOT NULL DEFAULT ''",
+	},
+	4: {
+		"ALTER TABLE session_state ADD COLUMN penalized_at TEXT NOT NULL DEFAULT ''",
 	},
 }
 
@@ -224,7 +231,8 @@ CREATE TABLE session_state (
   session_id    TEXT PRIMARY KEY,
   last_prompt   TEXT NOT NULL DEFAULT '',
   updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  attributed_at TEXT NOT NULL DEFAULT ''  -- set once, when usage attribution has credited this session
+  attributed_at TEXT NOT NULL DEFAULT '',  -- set once, when usage attribution has credited this session
+  penalized_at  TEXT NOT NULL DEFAULT ''   -- set once, when abandoned pointers have been penalized
 );
 
 CREATE TABLE card_stats (

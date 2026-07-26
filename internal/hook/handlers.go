@@ -198,15 +198,30 @@ func coverageNote(ctx context.Context, s *store.Store, sc retrieve.Scope) string
 // expanded) and enqueues the transcript for the Phase 4 learn worker — cheap
 // writes, no LLM, no parsing (learning never runs in a hook).
 func handleSessionEnd(ctx context.Context, base string, in Input) error {
-	if in.SessionID != "" {
-		if s, err := store.Open(ctx, config.DBPath(base)); err == nil {
-			if err := s.PenalizeAbandonedPointers(ctx, in.SessionID); err != nil {
-				logf(base, "session-end: pointer penalty: %v", err) // non-fatal
-			}
-			s.Close()
-		}
-	}
+	penalizeAbandonedPointers(ctx, base, in.SessionID)
 	return enqueueTranscript(base, in, "session-end")
+}
+
+// penalizeAbandonedPointers settles the session's unexpanded pointers. Wholly
+// best-effort: enqueuing the transcript is the part of session end that must
+// not be lost, so every failure here is logged and swallowed rather than
+// returned (C1). The caller's ctx already carries the per-event deadline, and
+// the store honours it on both open and write, so a locked database costs the
+// budget rather than the session. The penalty itself is applied at most once
+// per session inside the store — SessionEnd fires again on resume.
+func penalizeAbandonedPointers(ctx context.Context, base, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s, err := store.Open(ctx, config.DBPath(base))
+	if err != nil {
+		logf(base, "session-end: opening store for pointer penalty: %v", err)
+		return
+	}
+	defer s.Close()
+	if err := s.PenalizeAbandonedPointers(ctx, sessionID); err != nil {
+		logf(base, "session-end: pointer penalty: %v", err)
+	}
 }
 
 // enqueueTranscript writes one stable pointer job. Stop periodically refreshes

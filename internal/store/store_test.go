@@ -213,6 +213,7 @@ func TestMigrateV2PreservesRuntimeData(t *testing.T) {
 		DROP TABLE injections_v3;
 		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
 		ALTER TABLE session_state DROP COLUMN attributed_at;
+		ALTER TABLE session_state DROP COLUMN penalized_at;
 		PRAGMA user_version = 2;
 	`); err != nil {
 		t.Fatal(err)
@@ -282,6 +283,7 @@ func TestMigrateV1AddsRuntimeAttribution(t *testing.T) {
 		DROP TABLE injections_v3;
 		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
 		ALTER TABLE session_state DROP COLUMN attributed_at;
+		ALTER TABLE session_state DROP COLUMN penalized_at;
 		PRAGMA user_version = 1;
 	`); err != nil {
 		t.Fatal(err)
@@ -363,6 +365,7 @@ func TestMigrateV3PreservesRuntimeData(t *testing.T) {
 	// Simulate a pre-v4 database.
 	if _, err := s.db.ExecContext(ctx, `
 		ALTER TABLE session_state DROP COLUMN attributed_at;
+		ALTER TABLE session_state DROP COLUMN penalized_at;
 		PRAGMA user_version = 3;
 	`); err != nil {
 		t.Fatal(err)

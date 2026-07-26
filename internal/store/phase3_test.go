@@ -177,3 +177,62 @@ func TestPenalizeAbandonedPointers(t *testing.T) {
 		t.Error("expanded card must not be penalized")
 	}
 }
+
+// SessionEnd is not once-per-session: a resumed Claude session reaches it
+// again on the same session_id. The penalty is additive, so without a claim
+// the same pointers would be driven toward "noisy" twice as fast as their
+// evidence warrants — and the noisy bucket is what retire decisions read.
+func TestPenalizeAbandonedPointersAppliesOnce(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	if err := s.RecordInjections(ctx, "sess", "user-prompt-submit", "h", "", harness.Claude,
+		[]InjectionRecord{{CardID: "seen", Granularity: GranHook, Tokens: 10}}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		if err := s.PenalizeAbandonedPointers(ctx, "sess"); err != nil {
+			t.Fatalf("penalize %d: %v", i+1, err)
+		}
+	}
+	m, err := s.UtilityMultipliers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One application only: neg = 5*0.1 = 0.5 → 2*1/2.5 = 0.8. Three would
+	// give neg = 1.5 → 2*1/3.5 ≈ 0.571.
+	if math.Abs(m["seen"]-0.8) > 1e-6 {
+		t.Errorf("multiplier = %v, want 0.8 — penalty applied more than once", m["seen"])
+	}
+
+	// A different session is still penalized normally.
+	if err := s.RecordInjections(ctx, "sess2", "user-prompt-submit", "h", "", harness.Claude,
+		[]InjectionRecord{{CardID: "other", Granularity: GranHook, Tokens: 10}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PenalizeAbandonedPointers(ctx, "sess2"); err != nil {
+		t.Fatal(err)
+	}
+	m, err = s.UtilityMultipliers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(m["other"]-0.8) > 1e-6 {
+		t.Errorf("second session multiplier = %v, want 0.8", m["other"])
+	}
+}
+
+// The two markers are independent: settling one must not consume the other.
+func TestSessionMarkersAreIndependent(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	if err := s.PenalizeAbandonedPointers(ctx, "sess"); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimAttribution(ctx, "sess", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed {
+		t.Error("pointer penalty consumed the attribution claim")
+	}
+}
