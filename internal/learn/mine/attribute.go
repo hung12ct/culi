@@ -103,18 +103,54 @@ func (m *Miner) attributeUsage(ctx context.Context, sessionID string, entries []
 		return 0, nil
 	}
 
-	userPhrases, assistantPhrases := sessionPhrases(entries)
-	if len(assistantPhrases) == 0 {
+	index := make(map[string][]string, len(injected)*64)
+	for _, id := range injected {
+		card, err := m.Store.CardByID(ctx, id)
+		if err != nil {
+			continue // retired or removed since injection
+		}
+		for phrase := range shingle(prose(card.Title + " " + card.Summary + " " + card.Body)) {
+			index[phrase] = append(index[phrase], id)
+		}
+	}
+	if len(index) == 0 {
 		return 0, nil
+	}
+
+	// Match by streaming the transcript against the card index rather than
+	// shingling the transcript: sessions reach 30MB / 350k words, whose phrase
+	// set would cost tens of MB, while the index is bounded by the handful of
+	// cards injected. Phrases are built per entry, so a "phrase" can never span
+	// two messages.
+	userSupplied := make(map[string]bool)
+	for _, e := range entries {
+		if e.Role != "user" {
+			continue
+		}
+		eachShingle(e.Text, func(phrase string) {
+			if _, ok := index[phrase]; ok {
+				userSupplied[phrase] = true
+			}
+		})
+	}
+	hit := make(map[string]bool, len(injected))
+	for _, e := range entries {
+		if e.Role != "assistant" {
+			continue
+		}
+		eachShingle(e.Text, func(phrase string) {
+			if userSupplied[phrase] {
+				return
+			}
+			for _, id := range index[phrase] {
+				hit[id] = true
+			}
+		})
 	}
 
 	credited := 0
 	for _, id := range injected {
-		card, err := m.Store.CardByID(ctx, id)
-		if err != nil {
-			continue // card retired or removed since injection
-		}
-		if !reused(card, userPhrases, assistantPhrases) {
+		if !hit[id] {
 			continue
 		}
 		if err := m.Store.AddFeedback(ctx, id, store.FeedbackReferenced, attributionCredit); err != nil {
@@ -125,50 +161,27 @@ func (m *Miner) attributeUsage(ctx context.Context, sessionID string, entries []
 	return credited, nil
 }
 
-// reused reports whether any of the card's prose phrases came back out of the
-// assistant without the user having supplied them.
-func reused(card store.StoredCard, userPhrases, assistantPhrases map[string]bool) bool {
-	for phrase := range shingle(prose(card.Title + " " + card.Summary + " " + card.Body)) {
-		if assistantPhrases[phrase] && !userPhrases[phrase] {
-			return true
-		}
-	}
-	return false
-}
-
-// sessionPhrases splits the transcript into what the user typed and what the
-// assistant replied. Tool output is deliberately excluded: a card's wording
-// appearing in a grep result is evidence about the repo, not about the card.
-func sessionPhrases(entries []transcript.Entry) (user, assistant map[string]bool) {
-	var ub, ab strings.Builder
-	for _, e := range entries {
-		switch e.Role {
-		case "user":
-			ub.WriteString(e.Text)
-			ub.WriteByte('\n')
-		case "assistant":
-			ab.WriteString(e.Text)
-			ab.WriteByte('\n')
-		}
-	}
-	return shingle(ub.String()), shingle(ab.String())
-}
-
-// shingle returns the set of shingleN-word sequences carrying at least one
-// substantial word. Words are folded letter/digit runs, so punctuation and
-// formatting never affect matching.
-func shingle(text string) map[string]bool {
+// eachShingle calls fn for every shingleN-word sequence in text that carries at
+// least one substantial word. Words are folded letter/digit runs, so
+// punctuation and formatting never affect matching.
+func eachShingle(text string, fn func(string)) {
 	words := strings.FieldsFunc(retrieve.Fold(text), func(r rune) bool {
 		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	})
-	out := make(map[string]bool)
 	for i := 0; i+shingleN <= len(words); i++ {
 		gram := words[i : i+shingleN]
 		if !hasSubstantial(gram) {
 			continue
 		}
-		out[strings.Join(gram, " ")] = true
+		fn(strings.Join(gram, " "))
 	}
+}
+
+// shingle collects eachShingle into a set — used for the small card side,
+// never for a transcript.
+func shingle(text string) map[string]bool {
+	out := make(map[string]bool)
+	eachShingle(text, func(p string) { out[p] = true })
 	return out
 }
 

@@ -94,21 +94,11 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 		res.Notes = append(res.Notes, "skipped culi's own mining call (self-ingestion guard)")
 		return res, next, nil
 	}
-	// Usage attribution runs before the window check: a session can be clean of
-	// lessons and still have used its injected cards. Final jobs only (one
-	// SessionEnd per session), re-read from the start so a card is credited at
-	// most once no matter how many times Stop refreshed the job mid-session.
-	if job.IsFinal() {
-		if n, err := m.attributeSession(ctx, job); err != nil {
-			res.Notes = append(res.Notes, err.Error()) // never fail a run over a nudge
-		} else if n > 0 {
-			res.Attributed = n
-		}
-	}
-
 	wins := transcript.Extract(entries)
 	res.Windows = len(wins)
 	if len(wins) == 0 {
+		// A session can be clean of lessons and still have used its cards.
+		m.attribute(ctx, job, &res)
 		return res, next, nil // clean session: free
 	}
 	if m.Tier == nil {
@@ -158,7 +148,25 @@ func (m *Miner) MineSession(ctx context.Context, job queue.Job, cur queue.Cursor
 	if werr != nil {
 		return res, cur, werr
 	}
+	m.attribute(ctx, job, &res)
 	return res, next, nil
+}
+
+// attribute credits the session's used cards. Called only from the paths that
+// return `next` — i.e. where the caller will consume the job. Attribution must
+// not run before the LLM call: a capped or backend-down mine returns the old
+// cursor and leaves the job queued for a later run, so crediting early would
+// add another 0.5 to the same cards on every retry.
+func (m *Miner) attribute(ctx context.Context, job queue.Job, res *Result) {
+	if !job.IsFinal() {
+		return // one SessionEnd per session; Stop refreshes must not re-credit
+	}
+	n, err := m.attributeSession(ctx, job)
+	if err != nil {
+		res.Notes = append(res.Notes, err.Error()) // never fail a run over a nudge
+		return
+	}
+	res.Attributed = n
 }
 
 // apply lands the model output: dedup, lifecycle, card writes, style ledger.

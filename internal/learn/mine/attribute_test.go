@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/hung12ct/culi/internal/knowledge"
-	"github.com/hung12ct/culi/internal/learn/transcript"
 	"github.com/hung12ct/culi/internal/store"
 )
 
@@ -88,13 +87,34 @@ func TestReusedGuards(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			user := shingle(tc.userText)
-			asst := shingle(tc.asstText)
-			if got := reused(tc.card, user, asst); got != tc.want {
-				t.Errorf("reused() = %v, want %v (%s)", got, tc.want, tc.wantWhy)
+			if got := creditsCard(tc.card, tc.userText, tc.asstText); got != tc.want {
+				t.Errorf("credited = %v, want %v (%s)", got, tc.want, tc.wantWhy)
 			}
 		})
 	}
+}
+
+// creditsCard mirrors attributeUsage's matching for a single card without a
+// store: build the card phrase index, subtract what the user supplied, then
+// stream the assistant text against it.
+func creditsCard(c store.StoredCard, userText, asstText string) bool {
+	index := shingle(prose(c.Title + " " + c.Summary + " " + c.Body))
+	if len(index) == 0 {
+		return false
+	}
+	userSupplied := map[string]bool{}
+	eachShingle(userText, func(p string) {
+		if index[p] {
+			userSupplied[p] = true
+		}
+	})
+	hit := false
+	eachShingle(asstText, func(p string) {
+		if index[p] && !userSupplied[p] {
+			hit = true
+		}
+	})
+	return hit
 }
 
 // A phrase of nothing but short function words is English, not a fingerprint.
@@ -122,27 +142,29 @@ func TestShingleNormalizesFormatting(t *testing.T) {
 
 // Tool output is excluded: a card's wording in a grep result is evidence about
 // the repo, not about the card.
-func TestSessionPhrasesSplitsRoles(t *testing.T) {
-	entries := []transcript.Entry{
-		{Role: "user", Text: "please explain how the packer works"},
-		{Role: "assistant", Text: "the granularity ladder degrades gracefully under pressure"},
-		{Role: "other", Text: "this tool output should be ignored entirely"},
+// Phrases must not span message boundaries: two adjacent replies that happen
+// to abut cannot manufacture a phrase neither of them contains.
+func TestShinglesDoNotSpanEntries(t *testing.T) {
+	var spanning []string
+	for _, text := range []string{"the granularity ladder", "degrades gracefully today"} {
+		eachShingle(text, func(p string) { spanning = append(spanning, p) })
 	}
-	user, asst := sessionPhrases(entries)
-
-	if !user["please explain how the packer"] {
-		t.Errorf("user phrase missing: %v", user)
-	}
-	if len(asst) == 0 {
-		t.Fatal("assistant phrases empty")
-	}
-	for k := range asst {
-		if strings.Contains(k, "packer") {
-			t.Errorf("user text leaked into assistant phrases: %q", k)
+	for _, p := range spanning {
+		if strings.Contains(p, "ladder degrades") {
+			t.Errorf("phrase spanned two entries: %q", p)
 		}
-		if strings.Contains(k, "tool output") {
-			t.Errorf("non user/assistant role was collected: %q", k)
+	}
+	// The same words in one message do form the phrase.
+	var joined []string
+	eachShingle("the granularity ladder degrades gracefully today", func(p string) { joined = append(joined, p) })
+	found := false
+	for _, p := range joined {
+		if strings.Contains(p, "ladder degrades") {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("expected an in-message phrase spanning those words, got %v", joined)
 	}
 }
 
