@@ -30,9 +30,23 @@ const (
 // free card is flagged "expensive": ~2 full per-prompt budgets (700 tok) of
 // weekly spend with nothing to show for it. A fixed threshold beats a
 // percentile for explainability; tune here if corpora grow much hotter.
+//
+// effNoisyFloor is the weighted negative evidence a card needs before it is
+// called noisy. Without it, ONE unexpanded pointer (0.1 × wDownvoted = 0.5)
+// beat a zero Positive and marked the card noisy — indistinguishable from a
+// card the user explicitly rejected. Measured on a real store: 28 of 45
+// penalized cards sat at exactly one penalty, and pointers are expanded ~1% of
+// the time (1 expand across 107 pointer injections), so non-expansion is the
+// base rate, not evidence. One explicit downvote (1.0 × 5 = 5) still clears
+// this instantly — that is the user speaking. The automatic penalty needs more
+// than two misses, mirroring effMinObserved's "one quiet session proves
+// nothing". Strictly greater, so two undecayed penalties (exactly 1.0) land on
+// the same side of the line as two decayed ones — the verdict must not depend
+// on when it was read.
 const (
 	effMinObserved     = 3.0
 	effExpensiveTokens = 1500
+	effNoisyFloor      = 1.0
 )
 
 // WindowUsage is one card's footprint in the injection-log retention window
@@ -61,6 +75,12 @@ type Effectiveness struct {
 // never marks a card noisy. Negative inference comes only from explicit
 // downvotes and the abandoned-pointer penalty, both already in Downvoted;
 // signal-free cards are at most "expensive" when their token cost is high.
+//
+// The asymmetry only holds because of effNoisyFloor. A single unexpanded
+// pointer is barely distinguishable from "no signal" — expansion runs at about
+// 1% — so without the floor the noisy bucket degenerates into "was ever shown
+// as a pointer", which is exactly the silence this comment promises not to
+// punish.
 func ClassifyEffectiveness(cs CardStats, usage WindowUsage) Effectiveness {
 	e := Effectiveness{
 		Positive: wExpanded*cs.Expanded + wReferenced*cs.Referenced,
@@ -74,7 +94,7 @@ func ClassifyEffectiveness(cs CardStats, usage WindowUsage) Effectiveness {
 		e.PullRate = min(1, (cs.Expanded+cs.Referenced)/observed)
 	}
 	switch {
-	case e.Negative > e.Positive && e.Negative > 0:
+	case e.Negative > e.Positive && e.Negative > effNoisyFloor:
 		e.Bucket = EffNoisy
 	case e.Positive > 0:
 		e.Bucket = EffHelpful

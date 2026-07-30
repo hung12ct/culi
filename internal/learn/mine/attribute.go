@@ -33,12 +33,17 @@ import (
 // those. Phrase reuse is far stricter — a shared five-word sequence of prose is
 // hard to produce by coincidence.
 //
-// Two known limits, both erring toward missing credit rather than inventing it:
-// words are folded letter/digit runs, so a CJK session produces no phrases and
-// is never attributed; and cards imported from a repo's CLAUDE.md/AGENTS.md
-// share prose with text the harness already loads every turn, so a reply
-// restating it credits the card even though the injection was not the source —
-// a bias toward exactly the duplicated cards culi exists to collapse.
+// Known limits:
+//   - Words are folded letter/digit runs, so a CJK session produces no phrases
+//     and is never attributed. Errs toward missing credit.
+//   - Cards imported from a repo's CLAUDE.md/AGENTS.md share prose with text
+//     the harness already loads every turn, so a reply restating it credits the
+//     card even though the injection was not the source — a bias toward exactly
+//     the duplicated cards culi exists to collapse.
+//   - Self-reference: a session *about* a card quotes it, and that reads as
+//     use. Editing culi's own knowledge base is the case that hits this; the
+//     retired/candidate skip below covers the worst version (a card deleted for
+//     being wrong still earning credit) but not the general one.
 const (
 	// shingleN is the phrase length, calibrated against real sessions. Four
 	// words still collides on stock English — "starting a new feature" appears
@@ -129,7 +134,14 @@ func (m *Miner) attributeUsage(ctx context.Context, injected []string, entries [
 	for _, id := range injected {
 		card, err := m.Store.CardByID(ctx, id)
 		if err != nil {
-			continue // retired or removed since injection
+			continue // removed since injection
+		}
+		if card.Status == "retired" || card.Status == "candidate" {
+			// Retired mid-session, or never eligible to inject. Credit would
+			// only surface a dead card in the helpful list. Seen for real: a
+			// lesson retired as factually wrong still earned credit, because
+			// the session that retired it necessarily quoted it.
+			continue
 		}
 		for phrase := range shingle(prose(card.Title + " " + card.Summary + " " + card.Body)) {
 			index[phrase] = append(index[phrase], id)

@@ -189,3 +189,34 @@ func TestClaimAttributionPreservesLastPrompt(t *testing.T) {
 		t.Errorf("last_prompt = %q, want %q — claim clobbered gate state", prev, "the original prompt")
 	}
 }
+
+// A card retired mid-session must not be credited. Seen for real: a lesson
+// retired for being factually wrong still earned credit, because the session
+// that retired it necessarily quoted it — putting a dead card in the helpful
+// list.
+func TestAttributeUsageSkipsRetiredAndCandidateCards(t *testing.T) {
+	for _, status := range []string{"retired", "candidate"} {
+		t.Run(status, func(t *testing.T) {
+			ctx := context.Background()
+			s := attribStore(t, store.GranBody)
+			// Flip the card's lifecycle status after it was injected.
+			c := knowledge.Card{
+				ID: "rules/changelog", Path: "rules/changelog.md", Type: "rule",
+				Title: "Changelog on tag", Summary: "Tag discipline",
+				Body: cardGuidance, Scopes: []string{"global"}, Status: status,
+			}
+			if err := s.UpsertCard(ctx, c, 2, 2); err != nil {
+				t.Fatal(err)
+			}
+			m := &Miner{Store: s}
+			n, err := m.attributeUsage(ctx, injectedIn(t, s, "s1"),
+				usingCard("I will not tag a release without the matching changelog entry first"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n != 0 {
+				t.Errorf("credited a %s card %d time(s), want 0", status, n)
+			}
+		})
+	}
+}

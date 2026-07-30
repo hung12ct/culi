@@ -80,3 +80,46 @@ func TestCardWindowUsage(t *testing.T) {
 		t.Errorf("window usage = %v", got)
 	}
 }
+
+// Regression: before effNoisyFloor, a single unexpanded pointer (0.1 penalty,
+// weighted 0.5) beat a zero Positive and marked the card noisy — the same
+// verdict as an explicit user downvote. On a real store that put 28 of 45
+// penalized cards in the noisy bucket on one miss each, while pointers are
+// expanded roughly 1% of the time. Non-expansion is the base rate, not
+// evidence, so the bucket had degenerated into "was ever shown as a pointer".
+func TestNoisyNeedsMoreThanAnOccasionalIgnoredPointer(t *testing.T) {
+	usage := WindowUsage{Injections: 5, Tokens: 100}
+	cases := []struct {
+		name     string
+		downvote float64
+		want     string
+	}{
+		{"one ignored pointer", 0.1, EffUncertain},
+		{"two ignored pointers", 0.2, EffUncertain},
+		{"two, slightly decayed", 0.19, EffUncertain},
+		{"three ignored pointers", 0.3, EffNoisy},
+		{"three, slightly decayed", 0.28, EffNoisy},
+		// The user speaking still counts immediately: 1.0 x weight 5 = 5.
+		{"one explicit downvote", 1.0, EffNoisy},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ClassifyEffectiveness(CardStats{Downvoted: tc.downvote}, usage)
+			if got.Bucket != tc.want {
+				t.Errorf("downvoted=%v → %s, want %s (negative=%.2f)",
+					tc.downvote, got.Bucket, tc.want, got.Negative)
+			}
+		})
+	}
+}
+
+// A card that earns real positives must not be dragged noisy by the automatic
+// penalty alone — only by evidence that outweighs them.
+func TestPositivesSurviveAutomaticPenalties(t *testing.T) {
+	got := ClassifyEffectiveness(
+		CardStats{Referenced: 0.5, Downvoted: 0.3}, // 2.5 positive vs 1.5 negative
+		WindowUsage{Injections: 6, Tokens: 200})
+	if got.Bucket != EffHelpful {
+		t.Errorf("bucket = %s, want %s (pos=%.2f neg=%.2f)", got.Bucket, EffHelpful, got.Positive, got.Negative)
+	}
+}
