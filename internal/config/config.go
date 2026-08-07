@@ -19,6 +19,10 @@ type Config struct {
 	PushBudget int `yaml:"push_budget"`
 	// BaselineBudget is the max estimated tokens injected at SessionStart.
 	BaselineBudget int `yaml:"baseline_budget"`
+	// PointerLines caps the "▸ id Title: teaser" lines per injection. 0 (the
+	// default) disables them — see pack.DefaultHookLines for the measurements
+	// behind that. Raise it to restore the granularity ladder's third rung.
+	PointerLines int `yaml:"pointer_lines"`
 	// Ollama configures the local embedding endpoint (used from Phase 3).
 	Ollama OllamaConfig `yaml:"ollama"`
 	// ExtraAcks extends the built-in acknowledgement lexicon (the
@@ -212,6 +216,9 @@ func Load(base string) (Config, error) {
 	}
 	if cfg.BaselineBudget <= 0 {
 		cfg.BaselineBudget = defaultBaselineBudget
+	}
+	if cfg.PointerLines < 0 {
+		cfg.PointerLines = 0 // a negative cap is meaningless; treat as disabled
 	}
 	if cfg.Ollama.Endpoint == "" {
 		cfg.Ollama.Endpoint = defaultOllamaEndpoint

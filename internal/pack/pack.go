@@ -13,13 +13,28 @@ import (
 )
 
 const (
-	maxCards     = 8
-	maxHookLines = 4
-	maxBodyTok   = 400 // longer bodies are pull-only (Phase 3 expand_card)
-	envOpen      = "<ctx>"
-	envClose     = "</ctx>"
-	fillPercent  = 90
+	maxCards    = 8
+	maxBodyTok  = 400 // longer bodies are pull-only (Phase 3 expand_card)
+	envOpen     = "<ctx>"
+	envClose    = "</ctx>"
+	fillPercent = 90
 )
+
+// DefaultHookLines is how many "▸ id Title: teaser" pointer lines an injection
+// may carry. Zero by default, on evidence: across three weeks of daily use the
+// expand_card counter moved exactly once, over 78 pointer injections costing
+// 4,177 tokens (11.4% of all injected spend). A pointer only does something if
+// the model pulls it, and in practice it does not.
+//
+// Emitting them was also the sole feed for PenalizeAbandonedPointers, so every
+// pointer became a downvote at a ~100% base rate — negative feedback accrued
+// 2.1x faster than positive, dragging the whole corpus toward "noisy"
+// regardless of merit. Dropping the granularity fixes the token waste and the
+// signal corruption together.
+//
+// Raise it (config `pointer_lines`) to restore the ladder's third rung: cards
+// beyond the summary budget are then teased rather than dropped.
+const DefaultHookLines = 0
 
 // Item is one packed card at one granularity.
 type Item struct {
@@ -42,12 +57,13 @@ type BodyLoader func(rowids []int64) (map[int64]string, error)
 
 // Pack fills the budget greedily in rank order. injected holds the session's
 // prior granularity levels (monotonic dedup: a card re-emits only at a
-// strictly higher level).
-func Pack(cands []retrieve.Candidate, injected map[string]int, budget int, load BodyLoader) (Injection, error) {
+// strictly higher level). hookLines caps pointer lines (see DefaultHookLines);
+// at 0 a card that only fits as a pointer is dropped instead of teased.
+func Pack(cands []retrieve.Candidate, injected map[string]int, budget, hookLines int, load BodyLoader) (Injection, error) {
 	cands = mmrOrder(cands) // near-duplicates cost one slot, not two
 	usable := budget * fillPercent / 100
 	spent := 0
-	hookLines := 0
+	hooksUsed := 0
 	var out Injection
 
 	// Hydrate bodies once for every candidate that could plausibly go out at
@@ -85,10 +101,10 @@ func Pack(cands []retrieve.Candidate, injected map[string]int, budget int, load 
 			continue
 		}
 		if item.Granularity == store.GranHook {
-			if hookLines >= maxHookLines {
-				continue
+			if hooksUsed >= hookLines {
+				continue // pointer budget spent (0 ⇒ pointers disabled entirely)
 			}
-			hookLines++
+			hooksUsed++
 		}
 		spent += item.Tokens
 		out.Items = append(out.Items, item)

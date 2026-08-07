@@ -64,7 +64,7 @@ func BenchmarkHotPath(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if _, err := pack.Pack(cands, nil, 700, loader); err != nil {
+		if _, err := pack.Pack(cands, nil, 700, pack.DefaultHookLines, loader); err != nil {
 			b.Fatal(err)
 		}
 	}

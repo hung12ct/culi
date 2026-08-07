@@ -82,7 +82,7 @@ func handlePrompt(ctx context.Context, base string, in Input) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	inj, err := pack.Pack(cands, injected, cfg.PushBudget, bodyLoader(ctx, s))
+	inj, err := pack.Pack(cands, injected, cfg.PushBudget, cfg.PointerLines, bodyLoader(ctx, s))
 	if err != nil {
 		return "", err
 	}
@@ -151,9 +151,16 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 		return "", err
 	}
 	// The pointer header rides inside the same budget (C3): what the header
-	// costs, the cards cannot spend.
-	headerTok := knowledge.EstimateTokens(pack.PointerHeader)
-	inj, err := pack.Pack(cands, injected, cfg.BaselineBudget-headerTok, bodyLoader(ctx, s))
+	// costs, the cards cannot spend. With pointers disabled it would teach a
+	// syntax that never appears, so it is skipped and its budget returned to
+	// the cards.
+	header := ""
+	budget := cfg.BaselineBudget
+	if cfg.PointerLines > 0 {
+		header = pack.PointerHeader
+		budget -= knowledge.EstimateTokens(header)
+	}
+	inj, err := pack.Pack(cands, injected, budget, cfg.PointerLines, bodyLoader(ctx, s))
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +172,7 @@ func handleSessionStart(ctx context.Context, base string, in Input) (string, err
 		return "", err
 	}
 	lifecycleLog(base, in, "session-start", "ok source="+eventSource(in.Source))
-	return inj.RenderWith(pack.PointerHeader), nil
+	return inj.RenderWith(header), nil
 }
 
 // coverageNote implements the coverage-honesty amendment (plan §ecosystem 6):

@@ -36,6 +36,28 @@ Use an idempotency key on webhook processing; retries are at-least-once.
 	return base
 }
 
+// writeConfig drops a config.yaml into the sandbox so a test can exercise a
+// non-default setting (sandbox() leaves it absent, i.e. all defaults).
+func writeConfig(t *testing.T, base, yaml string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(base, "config.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// baselineContext pulls additionalContext out of a SessionStart hook response.
+func baselineContext(t *testing.T, out string) string {
+	t.Helper()
+	if out == "" {
+		t.Fatal("session-start injected nothing")
+	}
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(out), &resp); err != nil {
+		t.Fatalf("output not JSON: %v: %q", err, out)
+	}
+	return resp["hookSpecificOutput"].(map[string]any)["additionalContext"].(string)
+}
+
 func writeCard(t *testing.T, base, rel, content string) {
 	t.Helper()
 	full := filepath.Join(base, "knowledge", filepath.FromSlash(rel))
@@ -126,9 +148,26 @@ func TestSessionStartInjectsBaseline(t *testing.T) {
 	if !strings.Contains(ctxText, "Wrap Go errors") || !strings.Contains(ctxText, "<ctx>") {
 		t.Errorf("baseline content missing: %q", ctxText)
 	}
-	// The one-time pointer explainer rides with the baseline (plan §6).
+	// The pointer explainer (plan §6) teaches the "▸" syntax, so it must only
+	// ship when pointers can actually appear. Pointers are off by default now,
+	// so a header here would document a syntax the model will never see — and
+	// spend baseline budget doing it.
+	if strings.Contains(ctxText, "expand_card") {
+		t.Errorf("pointer header shipped while pointers are disabled: %q", ctxText)
+	}
+	if strings.Contains(ctxText, "▸") {
+		t.Errorf("pointer line shipped while pointers are disabled: %q", ctxText)
+	}
+}
+
+// Re-enabling pointers must bring the explainer back with them: a bare "▸"
+// line with no in-band instruction is what the header exists to prevent.
+func TestSessionStartPointerHeaderReturnsWithPointers(t *testing.T) {
+	base := sandbox(t)
+	writeConfig(t, base, "pointer_lines: 4\n")
+	ctxText := baselineContext(t, index(t, "sess-ptr"))
 	if !strings.Contains(ctxText, "expand_card") {
-		t.Errorf("pointer header missing from baseline: %q", ctxText)
+		t.Errorf("pointer header missing though pointer_lines=4: %q", ctxText)
 	}
 }
 

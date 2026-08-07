@@ -78,7 +78,7 @@ func Query(args []string) error {
 	tRetrieve := time.Since(t2)
 
 	t3 := time.Now()
-	inj, err := pack.Pack(cands, nil, cfg.PushBudget, func(rowids []int64) (map[int64]string, error) {
+	inj, err := pack.Pack(cands, nil, cfg.PushBudget, cfg.PointerLines, func(rowids []int64) (map[int64]string, error) {
 		cards, err := s.CardsByRowid(ctx, rowids)
 		if err != nil {
 			return nil, err

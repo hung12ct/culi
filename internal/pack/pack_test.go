@@ -35,7 +35,7 @@ func TestPackGranularityLadder(t *testing.T) {
 		cand(4, "d", "Fourth", "fourth summary", 100, false),
 		cand(5, "e", "Fifth", "fifth summary", 100, false),
 	}
-	inj, err := Pack(cands, nil, 700, loader(map[int64]string{1: "full body of the top card"}))
+	inj, err := Pack(cands, nil, 700, 4, loader(map[int64]string{1: "full body of the top card"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestPackBudgetDegrades(t *testing.T) {
 		cand(1, "a", "Big card", longSummary, 2000, false), // body over cap anyway
 		cand(2, "b", "Second big", longSummary, 100, false),
 	}
-	inj, err := Pack(cands, nil, 100, loader(nil))
+	inj, err := Pack(cands, nil, 100, 4, loader(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestPackMonotonicDedup(t *testing.T) {
 		"a": store.GranLevel(store.GranBody), // fully injected → skip entirely
 		"b": store.GranLevel(store.GranHook), // hook already → can upgrade to summary+
 	}
-	inj, err := Pack(cands, injected, 700, loader(map[int64]string{1: "body a"}))
+	inj, err := Pack(cands, injected, 700, 4, loader(map[int64]string{1: "body a"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestPackMonotonicDedup(t *testing.T) {
 }
 
 func TestPackEmpty(t *testing.T) {
-	inj, err := Pack(nil, nil, 700, nil)
+	inj, err := Pack(nil, nil, 700, 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestPackCaps(t *testing.T) {
 		id := string(rune('a' + i))
 		cands = append(cands, cand(i+1, id, "Card "+id, "summary "+id, 5000, false))
 	}
-	inj, err := Pack(cands, nil, 5000, loader(nil))
+	inj, err := Pack(cands, nil, 5000, 4, loader(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestMMRDemotesNearDuplicates(t *testing.T) {
 	c := cand(3, "rules/c", "C", "sum c", 0, false)
 	c.Score, c.Vec = 0.020, v2
 	cands := []retrieve.Candidate{a, dup, c}
-	inj, err := Pack(cands, nil, 700, nil)
+	inj, err := Pack(cands, nil, 700, 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,11 +172,56 @@ func TestMMRKeepsPinsFirst(t *testing.T) {
 	top := cand(2, "rules/top", "Top", "sum", 0, false)
 	top.Score, top.Vec = 0.050, v1
 	cands := []retrieve.Candidate{pin, top}
-	inj, err := Pack(cands, nil, 700, nil)
+	inj, err := Pack(cands, nil, 700, 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(inj.Items) < 2 || inj.Items[0].CardID != "rules/pin" {
 		t.Fatalf("pin lost its slot: %+v", inj.Items)
+	}
+}
+
+// The default: pointer lines are off, so a card that only fits as a "▸" line
+// is dropped rather than teased. Three weeks of production data showed exactly
+// one expand_card call across 78 pointer injections, while those injections
+// were the sole feed for the abandoned-pointer penalty.
+func TestPointersDisabledDropsInsteadOfTeasing(t *testing.T) {
+	cands := []retrieve.Candidate{
+		cand(1, "a", "Top card", "summary a", 40, false),
+		cand(2, "b", "Second", "summary b", 40, false),
+		cand(3, "c", "Third", "summary c", 40, false),
+		cand(4, "d", "Fourth", "summary d", 40, false),
+		cand(5, "e", "Fifth — pointer only", "summary e", 40, false),
+		cand(6, "f", "Sixth — pointer only", "summary f", 40, false),
+	}
+	off, err := Pack(cands, nil, 700, DefaultHookLines, loader(map[int64]string{1: "body a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, it := range off.Items {
+		if it.Granularity == store.GranHook {
+			t.Errorf("pointer emitted with hookLines=0: %+v", it)
+		}
+	}
+
+	// The mechanism still works when re-enabled — this is a default, not a removal.
+	on, err := Pack(cands, nil, 700, 4, loader(map[int64]string{1: "body a"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hooks := 0
+	for _, it := range on.Items {
+		if it.Granularity == store.GranHook {
+			hooks++
+		}
+	}
+	if hooks == 0 {
+		t.Fatal("expected pointer lines when hookLines=4; the ladder must remain reachable")
+	}
+	if len(off.Items) >= len(on.Items) {
+		t.Errorf("disabling pointers should drop cards: off=%d on=%d", len(off.Items), len(on.Items))
+	}
+	if off.Tokens >= on.Tokens {
+		t.Errorf("disabling pointers should cost fewer tokens: off=%d on=%d", off.Tokens, on.Tokens)
 	}
 }
