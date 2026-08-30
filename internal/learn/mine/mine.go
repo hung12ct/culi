@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/hung12ct/culi/internal/carddedup"
 	"github.com/hung12ct/culi/internal/config"
 	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/harness"
@@ -216,9 +217,9 @@ func (m *Miner) apply(ctx context.Context, job queue.Job, repo string, out mineO
 func (m *Miner) applyCard(ctx context.Context, typ string, c cardOut, repo string, res *Result) error {
 	match, verdict := m.findMatch(ctx, c, typ)
 	switch verdict {
-	case matchDup:
+	case carddedup.Dup:
 		return m.reinforce(ctx, match, c, res)
-	case matchNear:
+	case carddedup.Near:
 		// Conservative middle band (deviation from the plan's judge call —
 		// documented): probably the same insight phrased differently; creating
 		// a card risks a duplicate, so drop it and say so. Re-learning will
