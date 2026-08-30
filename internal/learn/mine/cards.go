@@ -30,15 +30,22 @@ func (m *Miner) confirmThreshold() int {
 	return defaultConfirmAt
 }
 
-// culiAuthored reports whether a card was written by culi (import, learning,
-// MCP save_lesson) and may therefore be rewritten via knowledge.UpdateFile.
-// Hand-authored files never round-trip through Render (C4).
+// culiAuthored reports whether a card was written by culi and may therefore
+// be rewritten via knowledge.UpdateFile. Hand-authored files never round-trip
+// through Render (C4).
+//
+// The list must name every provenance culi writes. It did not: the branch
+// pattern miner ("patterns") and `culi gen` ("gen") were missing, so 124 cards
+// culi had written itself were treated as hand-authored and no path could
+// retire them — not `culi review`, not the serve console, not card dupes. They
+// accumulated instead, which is most of why patterns dominate the stale list.
+// Keep this in sync with the Provenance.Source values set across the codebase.
 func culiAuthored(c knowledge.Card) bool {
 	if c.Provenance == nil {
 		return false
 	}
 	switch c.Provenance.Source {
-	case "learn", "mcp", "import":
+	case "learn", "mcp", "import", "patterns", "gen":
 		return true
 	}
 	return false
