@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/hung12ct/culi/internal/config"
+	"github.com/hung12ct/culi/internal/embed"
 	"github.com/hung12ct/culi/internal/importer"
 	"github.com/hung12ct/culi/internal/indexer"
 	"github.com/hung12ct/culi/internal/knowledge"
@@ -135,7 +136,14 @@ func importMerge(args []string) error {
 	fmt.Printf("merge:  %s\n", desc)
 	ctx, cancel := context.WithTimeout(context.Background(), mergeTimeout)
 	defer cancel()
-	res, err := importer.Merge(ctx, kdir, rep, m, importer.MergeOpts{Force: *force, Resume: *resume})
+	dedup, err := newImportDeduper(ctx, base, cfg.Ollama)
+	if err != nil {
+		return err
+	}
+	defer dedup.Close()
+	res, err := importer.Merge(ctx, kdir, rep, m, importer.MergeOpts{
+		Force: *force, Resume: *resume, Dedup: dedup.d,
+	})
 	if err != nil {
 		if importer.HasProgress(kdir) {
 			fmt.Println("tip:    finished units are kept — continue with `culi import merge --resume`")
@@ -156,6 +164,37 @@ func importMerge(args []string) error {
 	}
 	fmt.Printf("\nreview: git -C %s diff --no-index /dev/null .import/staged  (or open the files)\nnext:   culi import apply\n", kdir)
 	return nil
+}
+
+// importDeduper owns the store handle the merge-time dedup check reads from.
+// Kept open for the whole merge: the corpus snapshot is taken once, but the
+// Ollama-backed embedder is called per candidate.
+type importDeduper struct {
+	d importer.Deduper
+	s *store.Store
+}
+
+func (i importDeduper) Close() {
+	if i.s != nil {
+		_ = i.s.Close()
+	}
+}
+
+// newImportDeduper builds the merge-time duplicate check. A store that will
+// not open is not worth failing an import over — the merge runs without the
+// check, exactly as it did before this existed, and says so.
+func newImportDeduper(ctx context.Context, base string, oc config.OllamaConfig) (importDeduper, error) {
+	s, err := store.Open(ctx, config.DBPath(base))
+	if err != nil {
+		fmt.Printf("dedup:  off — cannot open the index (%v)\n", err)
+		return importDeduper{}, nil
+	}
+	d, err := importer.NewStoreDeduper(ctx, s, embed.NewOllama(oc.Endpoint, oc.Model, oc.KeepAlive), oc.Model)
+	if err != nil {
+		_ = s.Close()
+		return importDeduper{}, err
+	}
+	return importDeduper{d: d, s: s}, nil
 }
 
 // importApply moves reviewed staged files into knowledge/ and reindexes.

@@ -96,6 +96,11 @@ type MergeResult struct {
 type MergeOpts struct {
 	Force  bool // wipe staged output and progress, start over
 	Resume bool // keep staged output, skip units already recorded as done
+
+	// Dedup, when set, drops cards that duplicate one already in the store.
+	// Nil skips the check entirely — every candidate stages, which is what
+	// let two runs over the same repos create differently-slugged twins.
+	Dedup Deduper
 }
 
 // Merge stages every cluster and CLAUDE.md decomposition into
@@ -140,7 +145,7 @@ func Merge(ctx context.Context, knowledgeDir string, rep Report, m Merger, opts 
 	for _, cl := range rep.Clusters {
 		cl := cl
 		if err := step("cluster:"+cl.Key, func() error {
-			return mergeCluster(ctx, staged, cl, m, &res)
+			return mergeCluster(ctx, staged, cl, m, opts.Dedup, &res)
 		}); err != nil {
 			return res, err
 		}
@@ -148,7 +153,7 @@ func Merge(ctx context.Context, knowledgeDir string, rep Report, m Merger, opts 
 	for _, it := range rep.ClaudeMD {
 		it := it
 		if err := step("claudemd:"+it.Repo, func() error {
-			return mergeClaudeMD(ctx, staged, it, m, &res)
+			return mergeClaudeMD(ctx, staged, it, m, opts.Dedup, &res)
 		}); err != nil {
 			return res, err
 		}
@@ -164,7 +169,7 @@ func Merge(ctx context.Context, knowledgeDir string, rep Report, m Merger, opts 
 			continue
 		}
 		if err := step("agentsmd:"+it.Repo, func() error {
-			return mergeAgentsMD(ctx, staged, it, m, &res)
+			return mergeAgentsMD(ctx, staged, it, m, opts.Dedup, &res)
 		}); err != nil {
 			return res, err
 		}
@@ -179,7 +184,7 @@ func Merge(ctx context.Context, knowledgeDir string, rep Report, m Merger, opts 
 
 // mergeCluster stages one cluster: mechanical copy for identical/superset/
 // unique, LLM reconciliation for diverged.
-func mergeCluster(ctx context.Context, staged string, cl Cluster, m Merger, res *MergeResult) error {
+func mergeCluster(ctx context.Context, staged string, cl Cluster, m Merger, d Deduper, res *MergeResult) error {
 	canon := canonicalItem(cl)
 	scope := []string{"global"}
 	if cl.Class == "unique" {
@@ -229,6 +234,14 @@ func mergeCluster(ctx context.Context, staged string, cl Cluster, m Merger, res 
 				res.Notes = append(res.Notes, fmt.Sprintf("%s: residue named unknown repo %q — rescoped to %s", cl.Key, r.Repo, canon.Repo))
 				r.Repo = canon.Repo
 			}
+			skip, note := dedupSkip(ctx, d, "rule", residueTitle(cl, r), r.Summary)
+			if note != "" {
+				res.Notes = append(res.Notes, cl.Key+": "+note)
+			}
+			if skip {
+				res.Skipped = append(res.Skipped, cl.Key+": residue "+r.Title)
+				continue
+			}
 			rel, err := stageResidue(staged, cl, r)
 			if err != nil {
 				return err
@@ -248,15 +261,15 @@ func mergeCluster(ctx context.Context, staged string, cl Cluster, m Merger, res 
 }
 
 // mergeClaudeMD decomposes one repo's CLAUDE.md into cards + residual.
-func mergeClaudeMD(ctx context.Context, staged string, it Item, m Merger, res *MergeResult) error {
-	return mergeGuidance(ctx, staged, it, m, res, "claudemd", "CLAUDE.md")
+func mergeClaudeMD(ctx context.Context, staged string, it Item, m Merger, d Deduper, res *MergeResult) error {
+	return mergeGuidance(ctx, staged, it, m, d, res, "claudemd", "CLAUDE.md")
 }
 
-func mergeAgentsMD(ctx context.Context, staged string, it Item, m Merger, res *MergeResult) error {
-	return mergeGuidance(ctx, staged, it, m, res, "agentsmd", filepath.Base(it.Path))
+func mergeAgentsMD(ctx context.Context, staged string, it Item, m Merger, d Deduper, res *MergeResult) error {
+	return mergeGuidance(ctx, staged, it, m, d, res, "agentsmd", filepath.Base(it.Path))
 }
 
-func mergeGuidance(ctx context.Context, staged string, it Item, m Merger, res *MergeResult, kind, filename string) error {
+func mergeGuidance(ctx context.Context, staged string, it Item, m Merger, d Deduper, res *MergeResult, kind, filename string) error {
 	if m == nil {
 		res.Skipped = append(res.Skipped, fmt.Sprintf("%s/%s: needs LLM decomposition (set ANTHROPIC_API_KEY)", kind, it.Repo))
 		return nil
@@ -280,6 +293,14 @@ func mergeGuidance(ctx context.Context, staged string, it Item, m Merger, res *M
 			} else {
 				dc.Scope = "repo:" + it.Repo
 			}
+		}
+		skip, note := dedupSkip(ctx, d, cardType(dc.Type), dc.Title, dc.Summary)
+		if note != "" {
+			res.Notes = append(res.Notes, kind+"/"+it.Repo+": "+note)
+		}
+		if skip {
+			res.Skipped = append(res.Skipped, fmt.Sprintf("%s/%s: %s", kind, it.Repo, dc.Title))
+			continue
 		}
 		rel, err := stageDecomposed(staged, it.Repo, dc, modelName(m))
 		if err != nil {

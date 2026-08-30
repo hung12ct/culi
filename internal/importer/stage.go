@@ -48,14 +48,20 @@ func stageArtifact(staged string, cl Cluster, canon Item, fmRaw, body string, sc
 	return filepath.ToSlash(rel), nil
 }
 
+// residueTitle is the card title a residue stages under. Shared with the
+// dedup check so both name the candidate the same way.
+func residueTitle(cl Cluster, r Residue) string {
+	if r.Title != "" {
+		return r.Title
+	}
+	return cl.Name + " (" + r.Repo + ")"
+}
+
 // stageResidue writes repo-specific guidance the LLM carved out of a diverged
 // cluster as a repo-scoped rule card.
 func stageResidue(staged string, cl Cluster, r Residue) (string, error) {
 	rel := filepath.Join("rules", slugify(cl.Name+"-"+r.Repo)+".md")
-	title := r.Title
-	if title == "" {
-		title = cl.Name + " (" + r.Repo + ")"
-	}
+	title := residueTitle(cl, r)
 	card := knowledge.Card{
 		Path:       filepath.ToSlash(rel),
 		Type:       "rule",
@@ -68,15 +74,20 @@ func stageResidue(staged string, cl Cluster, r Residue) (string, error) {
 	return filepath.ToSlash(rel), writeCard(staged, rel, card)
 }
 
+// cardType normalises an LLM-supplied card type. Shared with the dedup check
+// so both compare against the same slice of the corpus.
+func cardType(typ string) string {
+	switch typ {
+	case "rule", "style", "pattern":
+		return typ
+	}
+	return "rule"
+}
+
 // stageDecomposed writes one card extracted from a CLAUDE.md. Scopes outside
 // the allowed set collapse to repo:<repo> — the LLM must never widen scope.
 func stageDecomposed(staged, repo string, dc DecomposedCard, model string) (string, error) {
-	typ := dc.Type
-	switch typ {
-	case "rule", "style", "pattern":
-	default:
-		typ = "rule"
-	}
+	typ := cardType(dc.Type)
 	scope := dc.Scope
 	if scope != "global" && !strings.HasPrefix(scope, "lang:") && scope != "repo:"+repo {
 		scope = "repo:" + repo
