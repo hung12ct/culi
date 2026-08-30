@@ -22,6 +22,7 @@ Usage:
   culi index [--full]           sync knowledge/ into the index + embed changed cards
   culi query [--timing] <text>  debug retrieval from the terminal
   culi card list|show|rm <id>   inspect the card store
+  culi card dupes [--retire]    find (and retire) cards that duplicate each other
   culi down <id>                downvote a card (ranks lower, never removed)
   culi import scan|merge|apply  reconcile drifted .claude dirs into the store
   culi export [--check]         regenerate ~/.claude agents/skills from cards

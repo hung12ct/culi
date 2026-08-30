@@ -16,7 +16,7 @@ import (
 // Card inspects the card store: list, show <id>, rm <id>.
 func Card(args []string) error {
 	if len(args) < 1 {
-		return fmt.Errorf("cli: usage: culi card list|show|rm <id>")
+		return fmt.Errorf("cli: usage: culi card list|show|dupes|rm <id>")
 	}
 	base, err := config.BaseDir()
 	if err != nil {
@@ -37,6 +37,8 @@ func Card(args []string) error {
 			return fmt.Errorf("cli: usage: culi card show <id>")
 		}
 		return cardShow(ctx, s, base, args[1])
+	case "dupes":
+		return cardDupes(ctx, s, base, args[1:])
 	case "rm":
 		if len(args) < 2 {
 			return fmt.Errorf("cli: usage: culi card rm <id>")
