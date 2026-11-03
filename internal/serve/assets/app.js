@@ -362,7 +362,7 @@ function screenOverview() {
       <div class="failed-head"><span class="ic">⚠</span><span class="tt">${o.failedJobs.length} failed job${o.failedJobs.length === 1 ? '' : 's'}</span></div>
       <div class="failed-line">${esc(o.failedJobs[0].kind)} — <span class="mono">${esc(o.failedJobs[0].at)}</span></div>
       <div class="failed-sub">${esc(o.failedJobs[0].reason)}</div>
-      <div class="failed-help mono">Run: culi learn</div>
+      <div class="failed-help mono">Details: culi learn --failed · retry: culi learn --retry-failed</div>
     </div>` : '';
   const noisy = (o.noisy || []).map(c => {
     const nm = c.short

@@ -122,6 +122,7 @@ type effCard struct {
 type learningReport struct {
 	InboxPending      int   `json:"inbox_pending"`
 	FailedJobs        int   `json:"failed_jobs"`
+	FailedRetryable   int   `json:"failed_retryable"`
 	StyleObservations int   `json:"style_observations"`
 	SpendToday        spend `json:"spend_today"`
 	Spend7d           spend `json:"spend_7d"`
@@ -290,12 +291,11 @@ func gatherLearning(base string) learningReport {
 	if jobs, err := queue.List(config.InboxDir(base)); err == nil {
 		r.InboxPending = len(jobs)
 	}
-	if entries, err := os.ReadDir(filepath.Join(config.InboxDir(base), "failed")); err == nil {
-		for _, e := range entries {
-			// Only parked job files count — a stray .DS_Store must not trip
-			// the loud FAILED JOBS line.
-			if !e.IsDir() && strings.Contains(e.Name(), ".json") {
-				r.FailedJobs++
+	if parked, err := queue.Failed(config.InboxDir(base)); err == nil {
+		r.FailedJobs = len(parked)
+		for _, p := range parked {
+			if !p.Malformed && p.TranscriptExists {
+				r.FailedRetryable++
 			}
 		}
 	}
@@ -380,7 +380,7 @@ func renderText(rep report) {
 	fmt.Println("learning")
 	fmt.Printf("  inbox              %d pending\n", l.InboxPending)
 	if l.FailedJobs > 0 {
-		fmt.Printf("  FAILED JOBS        %d in inbox/failed — inspect them, these are bugs\n", l.FailedJobs)
+		fmt.Printf("  FAILED JOBS        %d parked (%d retryable) — see reasons: culi learn --failed\n", l.FailedJobs, l.FailedRetryable)
 	}
 	if l.StyleObservations > 0 {
 		fmt.Printf("  style observations %d\n", l.StyleObservations)

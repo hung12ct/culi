@@ -19,6 +19,7 @@ import (
 	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/knowledge"
 	"github.com/hung12ct/culi/internal/learn/llmtier"
+	"github.com/hung12ct/culi/internal/learn/queue"
 	"github.com/hung12ct/culi/internal/store"
 )
 
@@ -369,10 +370,7 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 		{Label: "Spend today", Value: fmtUSD(sv.Learning.SpendToday.USD), Sub: itoa(sv.Learning.SpendToday.Calls) + " calls", Color: "var(--metric-default)"},
 	}
 
-	var failed []failedJob
-	if sv.Learning.FailedJobs > 0 {
-		failed = []failedJob{{Kind: "learn run", At: "", Reason: "a queued learn job failed — retry it from the inbox"}}
-	}
+	failed := failedJobs(s.base)
 
 	// Rows arrive sorted pull-rate-then-tokens desc, so the top 3 are the
 	// worst-scoring rather than strictly the most expensive. Score shows the
@@ -880,6 +878,34 @@ func round(f float64) int {
 	return int(f + 0.5)
 }
 func fmtUSD(f float64) string { return fmt.Sprintf("$%.2f", f) }
+
+// failedJobs lists parked learn jobs newest first, with the recorded cause.
+func failedJobs(base string) []failedJob {
+	parked, err := queue.Failed(config.InboxDir(base))
+	if err != nil {
+		return nil
+	}
+	out := make([]failedJob, 0, len(parked))
+	for _, p := range parked {
+		if p.Malformed {
+			out = append(out, failedJob{Kind: "malformed job file", At: p.File, Reason: "unreadable; safe to clear"})
+			continue
+		}
+		at := p.FailedAt
+		if at == "" {
+			at = p.EnqueuedAt
+		}
+		reason := p.LastError
+		if reason == "" {
+			reason = "reason not recorded (parked before culi recorded failure reasons)"
+		}
+		if !p.TranscriptExists {
+			reason += " · transcript gone, cannot retry"
+		}
+		out = append(out, failedJob{Kind: p.EffectiveSource().String() + " learn job", At: at, Reason: reason})
+	}
+	return out
+}
 
 // fmtPerSession renders the average per-session injection, or "—" before any
 // session has been recorded.

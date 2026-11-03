@@ -43,8 +43,14 @@ func Learn(args []string) error {
 	scanCodex := fs.Bool("scan-codex", false, "discover and enqueue Codex rollout history before learning")
 	scanCodexForce := fs.Bool("scan-codex-force", false, "force an automatic final Codex scan (internal lifecycle use)")
 	dryRun := fs.Bool("dry-run", false, "with --scan-codex, list discovered sessions without writing or learning")
+	listFailed := fs.Bool("failed", false, "list parked (failed) jobs with the recorded reason, then exit")
+	retryFailed := fs.Bool("retry-failed", false, "move parked jobs whose transcript still exists back into the queue, then exit")
+	clearFailed := fs.Bool("clear-failed", false, "delete all parked job pointers (transcripts are untouched), then exit")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
+	}
+	if *listFailed || *retryFailed || *clearFailed {
+		return failedJobs(*listFailed, *retryFailed, *clearFailed)
 	}
 	if *dryRun && !*scanCodex {
 		return fmt.Errorf("cli: --dry-run requires --scan-codex")
@@ -323,4 +329,71 @@ func fileLogf(base, name string) func(string, ...any) {
 		msg := fmt.Sprintf(format, args...)
 		fmt.Fprintf(f, "%s %s\n", time.Now().UTC().Format(time.RFC3339), strings.TrimRight(msg, "\n"))
 	}
+}
+
+// failedJobs serves `culi learn --failed|--retry-failed|--clear-failed`: the
+// manual side of the fail ladder. Exactly one action runs.
+func failedJobs(list, retry, clear bool) error {
+	if (list && retry) || (list && clear) || (retry && clear) {
+		return fmt.Errorf("cli: use only one of --failed, --retry-failed, --clear-failed")
+	}
+	base, _, err := loadBase()
+	if err != nil {
+		return err
+	}
+	inbox := config.InboxDir(base)
+	switch {
+	case retry:
+		n, err := queue.RetryFailed(inbox)
+		if err != nil {
+			return fmt.Errorf("cli: %w", err)
+		}
+		fmt.Printf("requeued %d job(s); they run on the next learn (or now: culi learn)\n", n)
+		return nil
+	case clear:
+		n, err := queue.ClearFailed(inbox)
+		if err != nil {
+			return fmt.Errorf("cli: %w", err)
+		}
+		fmt.Printf("cleared %d parked job(s)\n", n)
+		return nil
+	}
+	parked, err := queue.Failed(inbox)
+	if err != nil {
+		return fmt.Errorf("cli: %w", err)
+	}
+	if len(parked) == 0 {
+		fmt.Println("no failed jobs")
+		return nil
+	}
+	recoverable := 0
+	for _, p := range parked {
+		printParked(p)
+		if !p.Malformed && p.TranscriptExists {
+			recoverable++
+		}
+	}
+	fmt.Printf("\n%d failed, %d retryable. culi learn --retry-failed requeues those; --clear-failed drops all.\n",
+		len(parked), recoverable)
+	return nil
+}
+
+func printParked(p queue.Parked) {
+	if p.Malformed {
+		fmt.Printf("%s  malformed job file\n", p.File)
+		return
+	}
+	when := p.FailedAt
+	if when == "" {
+		when = p.EnqueuedAt
+	}
+	state := "transcript present"
+	if !p.TranscriptExists {
+		state = "transcript gone (cannot retry)"
+	}
+	reason := p.LastError
+	if reason == "" {
+		reason = "not recorded (parked before culi recorded failure reasons)"
+	}
+	fmt.Printf("%s  %s  %s  %s\n  reason: %s\n", p.SessionID, when, p.EffectiveSource(), state, reason)
 }

@@ -168,10 +168,10 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
 			return false // run halted/timed out — leave the job queued, don't park
 		case err != nil:
-			parked, ferr := queue.Fail(job)
-			note := fmt.Sprintf("job %s failed: %v", job.SessionID, err)
+			parked, ferr := queue.Fail(job, err)
+			note := fmt.Sprintf("job %s failed (attempt %d): %v", job.SessionID, job.Attempts()+1, err)
 			if parked {
-				note += " (moved to inbox/failed)"
+				note += " (moved to inbox/failed; see culi learn --failed)"
 			}
 			if ferr != nil {
 				note += " (" + ferr.Error() + ")"

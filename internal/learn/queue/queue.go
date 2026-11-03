@@ -31,6 +31,10 @@ type Job struct {
 	Source         harness.Harness `json:"source,omitempty"`
 	Trigger        string          `json:"trigger,omitempty"`
 	EnqueuedAt     string          `json:"enqueued_at"`
+	// LastError and FailedAt record the most recent failed attempt, so a
+	// parked job says why it was parked instead of just that it was.
+	LastError string `json:"last_error,omitempty"`
+	FailedAt  string `json:"failed_at,omitempty"`
 
 	path     string // job file on disk
 	attempts int    // prior failed attempts, parsed from the .fN suffix
@@ -49,14 +53,19 @@ func Enqueue(inboxDir string, job Job) error {
 	if err := os.MkdirAll(inboxDir, 0o755); err != nil {
 		return fmt.Errorf("queue: creating inbox: %w", err)
 	}
+	key := job.EffectiveSource().String() + job.SessionID + job.TranscriptPath
+	sum := sha256.Sum256([]byte(key))
+	return writeJobFile(filepath.Join(inboxDir, hex.EncodeToString(sum[:8])+".json"), job)
+}
+
+// writeJobFile atomically writes job as JSON to path (temp file + rename in the
+// same directory), so a reader never sees a half-written job.
+func writeJobFile(path string, job Job) error {
 	raw, err := json.Marshal(job)
 	if err != nil {
 		return fmt.Errorf("queue: marshaling job: %w", err)
 	}
-	key := job.EffectiveSource().String() + job.SessionID + job.TranscriptPath
-	sum := sha256.Sum256([]byte(key))
-	path := filepath.Join(inboxDir, hex.EncodeToString(sum[:8])+".json")
-	tmp, err := os.CreateTemp(inboxDir, ".job-*.tmp")
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".job-*.tmp")
 	if err != nil {
 		return fmt.Errorf("queue: creating temporary job: %w", err)
 	}
@@ -184,24 +193,39 @@ func Done(j Job) error {
 	return nil
 }
 
-// Fail records one failed attempt. The job file survives under a .fN suffix
-// until maxAttempts, then moves to inbox/failed/ for manual inspection.
-// Returns true when the job was parked (no more retries).
-func Fail(j Job) (parked bool, err error) {
-	dir := filepath.Dir(j.path)
-	next := j.attempts + 1
-	if next >= maxAttempts {
-		if err := park(dir, j.path); err != nil {
-			return false, err
+// maxErrorLen bounds the recorded failure cause; a backend can return a whole
+// HTML error page.
+const maxErrorLen = 600
+
+// Fail records one failed attempt and its cause. The job file survives under a
+// .fN suffix until maxAttempts, then moves to inbox/failed/ for manual
+// inspection. Returns true when the job was parked (no more retries).
+func Fail(j Job, cause error) (parked bool, err error) {
+	if cause != nil {
+		j.LastError = cause.Error()
+		if len(j.LastError) > maxErrorLen {
+			j.LastError = j.LastError[:maxErrorLen] + "…"
 		}
-		return true, nil
 	}
+	j.FailedAt = time.Now().UTC().Format(time.RFC3339)
+	dir := filepath.Dir(j.path)
 	base := strings.TrimSuffix(filepath.Base(j.path), ".f"+strconv.Itoa(j.attempts))
+	next := j.attempts + 1
 	dst := filepath.Join(dir, base+".f"+strconv.Itoa(next))
-	if err := os.Rename(j.path, dst); err != nil {
-		return false, fmt.Errorf("queue: renaming failed job: %w", err)
+	if next >= maxAttempts {
+		failed := filepath.Join(dir, "failed")
+		if err := os.MkdirAll(failed, 0o755); err != nil {
+			return false, fmt.Errorf("queue: creating failed dir: %w", err)
+		}
+		dst = filepath.Join(failed, base+".f"+strconv.Itoa(j.attempts))
 	}
-	return false, nil
+	if err := writeJobFile(dst, j); err != nil {
+		return false, err
+	}
+	if err := os.Remove(j.path); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("queue: removing failed job: %w", err)
+	}
+	return next >= maxAttempts, nil
 }
 
 // park moves a job file into inbox/failed/.
