@@ -58,7 +58,7 @@ func ReadFrom(path string, offset int64) ([]Entry, int64, error) {
 		if complete {
 			pos += int64(len(line))
 			if e, ok := parseLine(line); ok {
-				entries = append(entries, e)
+				entries = append(entries, RedactEntry(e))
 			}
 		}
 		if err == io.EOF {
