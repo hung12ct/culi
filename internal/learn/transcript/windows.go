@@ -22,7 +22,7 @@ const (
 
 // Window is one signal region: entries [Start, End] around a trigger.
 type Window struct {
-	Reason string // correction | rejection | repeated | tool_error
+	Reason string // correction | rejection | instruction | repeated | tool_error
 	Start  int
 	End    int
 }
@@ -37,6 +37,24 @@ var correctionPhrases = []string{
 	// vi (folded)
 	"khong phai", "khong dung", "sai roi", "dung lai", "da bao", "da noi", "lam lai",
 }
+
+// standingPhrases mark a user message that states a rule to keep following:
+// "always run make verify", "from now on…", "conventions for this repo".
+// Matched like correctionPhrases. Bare "luon" is left out on purpose: in
+// Vietnamese "lam luon" means "do it right away", not "always".
+var standingPhrases = []string{
+	// en
+	"always", "never", "from now on", "going forward", "in future", "in the future",
+	"every future", "convention", "conventions", "remember to", "remember that",
+	"please remember", "house rule",
+	// vi (folded)
+	"luon luon", "luon phai", "khong bao gio", "tu gio", "tu nay", "ve sau",
+	"nho la", "nho rang", "quy uoc", "quy tac", "lan sau",
+}
+
+// notStanding are fixed expressions that contain a standing phrase but are
+// not instructions.
+var notStanding = []string{"never mind", "nevermind"}
 
 // correctionStarts only count at the beginning of a message — "no" mid-text is
 // ordinary prose, "No, ..." as an opener is a correction.
@@ -60,6 +78,8 @@ func Extract(entries []Entry) []Window {
 			wins = append(wins, window("correction", i, len(entries)))
 		case isRejection(e):
 			wins = append(wins, window("rejection", i, len(entries)))
+		case e.Role == "user" && isStandingInstruction(e.Text):
+			wins = append(wins, window("instruction", i, len(entries)))
 		case e.Role == "user" && isRepeat(userTerms, i):
 			wins = append(wins, window("repeated", i, len(entries)))
 		case len(e.ToolErrors) > 0:
@@ -72,6 +92,21 @@ func Extract(entries []Entry) []Window {
 
 func window(reason string, i, n int) Window {
 	return Window{Reason: reason, Start: max(0, i-winBefore), End: min(n-1, i+winAfter)}
+}
+
+// isStandingInstruction reports whether a user message states a rule meant to
+// outlive the current task.
+func isStandingInstruction(text string) bool {
+	padded := " " + normalize(text) + " "
+	for _, p := range notStanding {
+		padded = strings.ReplaceAll(padded, " "+p+" ", " ")
+	}
+	for _, p := range standingPhrases {
+		if strings.Contains(padded, " "+p+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // isCorrection matches the correction lexicon against normalized text.
@@ -151,7 +186,7 @@ func priority(reason string) int {
 	switch reason {
 	case "rejection":
 		return 3
-	case "correction":
+	case "correction", "instruction":
 		return 2
 	case "repeated":
 		return 1
