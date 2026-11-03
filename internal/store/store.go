@@ -30,7 +30,11 @@ import (
 // abandoned-pointer penalty, which a resumed session would otherwise apply
 // twice. Separate from attributed_at because the two are applied by different
 // processes at different times.
-const schemaVersion = 5
+// v6: cards gained `origin` (the card's provenance source) so retrieval can
+// hold machine-written trigger keywords to a stricter bar than hand-written
+// ones. Card rows are file-backed, so the migration zeroes mtime and the next
+// sync re-reads every card to fill the column.
+const schemaVersion = 6
 
 var schemaMigrations = map[int][]string{
 	1: {
@@ -45,6 +49,10 @@ var schemaMigrations = map[int][]string{
 	},
 	4: {
 		"ALTER TABLE session_state ADD COLUMN penalized_at TEXT NOT NULL DEFAULT ''",
+	},
+	5: {
+		"ALTER TABLE cards ADD COLUMN origin TEXT NOT NULL DEFAULT ''",
+		"UPDATE cards SET mtime = 0",
 	},
 }
 
@@ -190,7 +198,8 @@ CREATE TABLE cards (
   tok_body     INTEGER NOT NULL,
   content_hash TEXT NOT NULL,
   mtime        INTEGER NOT NULL,
-  size         INTEGER NOT NULL
+  size         INTEGER NOT NULL,
+  origin       TEXT NOT NULL DEFAULT ''  -- provenance source: learn | patterns | gen | import | mcp | ''
 );
 
 -- Standalone FTS5 (own storage): corpus is small, duplication is cheaper than

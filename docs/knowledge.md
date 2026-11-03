@@ -44,7 +44,10 @@ Important fields:
   `branch:<repo>@<glob>`, or an internal directory scope.
 - `key`: optional shadowing identity. When cards with the same key are in scope, the narrowest
   branch/repository/language card wins.
-- `triggers.keywords` and `triggers.globs`: strong retrieval hints. Culi limits forced trigger pins
+- `triggers.keywords` and `triggers.globs`: strong retrieval hints. A hand-written card's trigger
+  pins it; on a card written by learning or generation (`provenance.source` of `learn`, `patterns`
+  or `gen`) a trigger only counts when the card also ranks near the top of the keyword or semantic
+  search, because generated keywords are often generic. Culi limits forced trigger pins
   so they cannot consume the entire token budget.
 - `aliases`: extra search vocabulary.
 - `baseline`: eligible for the SessionStart baseline.

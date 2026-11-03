@@ -8,6 +8,7 @@ package retrieve
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -24,6 +25,20 @@ const (
 	maxCandidates = 12
 	maxPins       = 2
 	pinFallback   = 0.01 // bonus for trigger hits beyond the pin cap
+
+	// armDepth: a candidate must rank in the top armDepth of the BM25 or the
+	// cosine arm. Clearing the lexical floor on two shared words is easy for a
+	// long prompt; being near the top of an arm is not. On a labeled replay of
+	// 45 real prompts this cut injected noise cards from 22 to 15 without
+	// losing a hit. Hand-written trigger pins are exempt: those keywords are
+	// intent, not a guess.
+	armDepth = 6
+
+	// relFloor drops unpinned candidates whose relevance (arm evidence, before
+	// utility and the scope bonus) is below this fraction of the best
+	// candidate's, so a strong match is not padded with weak ones just because
+	// slots are free.
+	relFloor = 0.6
 )
 
 // Candidate is one card that survived the funnel, best first. Vec is the
@@ -34,6 +49,8 @@ type Candidate struct {
 	Score  float64
 	Pinned bool
 	Vec    []float32
+
+	relevance float64 // fused arm score before utility and the scope bonus
 }
 
 // Retriever runs the funnel against a store. Embedder nil ⇒ BM25-only.
@@ -131,19 +148,58 @@ func (r *Retriever) Retrieve(ctx context.Context, query string, sc Scope) ([]Can
 		if !pinned && cosSim[c.Rowid] < cosFloor && !lexicalPass {
 			continue
 		}
+		// Generated trigger keywords are generic ("config", "quiz"), so a
+		// machine-written card needs arm evidence even when one of them hits.
+		handPinned := pinned && !c.MachineAuthored()
+		if !handPinned && bestArmRank(c.Rowid, bm25Rank, cosRank) > armDepth {
+			continue
+		}
 
+		// Relevance is arm evidence alone: utility only reorders and must never
+		// push a card below the tail floor (downvotes demote, never bury).
+		relevance := score
 		if u, ok := utils[c.ID]; ok {
 			score *= u
 		}
 		score += sc.Boost(rank)
-		out = append(out, Candidate{Card: c, Score: score, Pinned: pinned, Vec: a.vecs[c.Rowid]})
+		out = append(out, Candidate{Card: c, Score: score, Pinned: pinned, Vec: a.vecs[c.Rowid], relevance: relevance})
 	}
 
+	out = dropWeakTail(out)
 	out = capPins(out)
 	if len(out) > maxCandidates {
 		out = out[:maxCandidates]
 	}
 	return out, nil
+}
+
+// bestArmRank is the candidate's best 1-based rank across the BM25 and cosine
+// arms, or a large number when neither arm returned it.
+func bestArmRank(rowid int64, bm25Rank, cosRank map[int64]int) int {
+	best := math.MaxInt
+	if r, ok := bm25Rank[rowid]; ok {
+		best = r
+	}
+	if r, ok := cosRank[rowid]; ok && r < best {
+		best = r
+	}
+	return best
+}
+
+// dropWeakTail removes unpinned candidates whose relevance is below relFloor
+// of the strongest candidate's. Filters in place.
+func dropWeakTail(out []Candidate) []Candidate {
+	best := 0.0
+	for _, c := range out {
+		best = max(best, c.relevance)
+	}
+	kept := out[:0]
+	for _, c := range out {
+		if c.Pinned || c.relevance >= relFloor*best {
+			kept = append(kept, c)
+		}
+	}
+	return kept
 }
 
 // capPins sorts candidates (pins first, then score) and demotes trigger hits

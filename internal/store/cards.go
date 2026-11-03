@@ -69,12 +69,12 @@ func (s *Store) UpsertCard(ctx context.Context, c knowledge.Card, mtime, size in
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO cards (id, short_id, path, type, title, summary, body, scopes, key,
 		                   trig_kw, trig_glob, aliases, baseline, status,
-		                   tok_summary, tok_body, content_hash, mtime, size)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		                   tok_summary, tok_body, content_hash, mtime, size, origin)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		c.ID, shortID, c.Path, c.Type, c.Title, c.Summary, c.Body,
 		jsonArr(c.Scopes), c.Key, jsonArr(c.Triggers.Keywords), jsonArr(c.Triggers.Globs),
 		jsonArr(c.Aliases), boolInt(c.Baseline), c.Status,
-		c.TokSummary, c.TokBody, c.ContentHash, mtime, size)
+		c.TokSummary, c.TokBody, c.ContentHash, mtime, size, origin(c))
 	if err != nil {
 		return fmt.Errorf("store: inserting card %s: %w", c.ID, err)
 	}
@@ -127,6 +127,18 @@ type StoredCard struct {
 	knowledge.Card
 	Rowid   int64
 	ShortID string
+	Origin  string // provenance source from the card file; "" when hand-written
+}
+
+// MachineAuthored reports whether a pipeline wrote the card (transcript
+// learning, branch patterns, git-history generation) rather than a person.
+// Such cards carry generated trigger keywords, which are often generic.
+func (c StoredCard) MachineAuthored() bool {
+	switch c.Origin {
+	case "learn", "patterns", "gen":
+		return true
+	}
+	return false
 }
 
 // AllCards returns every card (corpus is small; callers filter in Go).
@@ -169,7 +181,14 @@ func (s *Store) CardByID(ctx context.Context, id string) (StoredCard, error) {
 }
 
 const cardCols = `rowid, id, short_id, path, type, title, summary, body, scopes, key,
-	trig_kw, trig_glob, aliases, baseline, status, tok_summary, tok_body, content_hash`
+	trig_kw, trig_glob, aliases, baseline, status, tok_summary, tok_body, content_hash, origin`
+
+func origin(c knowledge.Card) string {
+	if c.Provenance == nil {
+		return ""
+	}
+	return c.Provenance.Source
+}
 
 func (s *Store) queryCards(ctx context.Context, q string, args ...any) ([]StoredCard, error) {
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -184,7 +203,7 @@ func (s *Store) queryCards(ctx context.Context, q string, args ...any) ([]Stored
 		var baseline int
 		if err := rows.Scan(&c.Rowid, &c.ID, &c.ShortID, &c.Path, &c.Type, &c.Title,
 			&c.Summary, &c.Body, &scopes, &c.Key, &kw, &glob, &aliases,
-			&baseline, &c.Status, &c.TokSummary, &c.TokBody, &c.ContentHash); err != nil {
+			&baseline, &c.Status, &c.TokSummary, &c.TokBody, &c.ContentHash, &c.Origin); err != nil {
 			return nil, fmt.Errorf("store: scanning card: %w", err)
 		}
 		c.Scopes = fromJSONArr(scopes)

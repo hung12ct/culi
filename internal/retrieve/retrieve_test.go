@@ -2,6 +2,7 @@ package retrieve
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -184,5 +185,71 @@ func TestDetectScope(t *testing.T) {
 	sc = DetectScope(plain)
 	if sc.Repo != "" || len(sc.Allowed) != 2 {
 		t.Fatalf("non-git scope = %+v", sc)
+	}
+}
+
+// A machine-written card whose generic trigger keyword hits must still rank
+// near the top of an arm; the same trigger on a hand-written card is intent
+// and keeps its pin.
+func TestRetrieveMachinePinNeedsArmEvidence(t *testing.T) {
+	var cards []knowledge.Card
+	for i := 0; i < 8; i++ { // more strong matches than armDepth
+		c := mkCard(fmt.Sprintf("rules/deploy-%d", i), fmt.Sprintf("Staging deploy checklist %d", i),
+			"deploy the release to staging, then verify the staging deploy before the release")
+		cards = append(cards, c)
+	}
+	learned := mkCard("lessons/learned", "Learned note", "something unrelated about invoices")
+	learned.Triggers.Keywords = []string{"release"}
+	learned.Provenance = &knowledge.Provenance{Source: "learn"}
+	hand := mkCard("rules/hand", "Hand note", "something unrelated about invoices too")
+	hand.Triggers.Keywords = []string{"release"}
+	cards = append(cards, learned, hand)
+	r := &Retriever{Store: testStore(t, cards...)}
+
+	got, err := r.Retrieve(context.Background(), "deploy the release to staging and verify the deploy", globalScope())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawHand bool
+	for _, c := range got {
+		if c.Card.ID == "lessons/learned" {
+			t.Fatalf("machine-written pin without arm evidence survived: %+v", c)
+		}
+		if c.Card.ID == "rules/hand" && c.Pinned {
+			sawHand = true
+		}
+	}
+	if !sawHand {
+		t.Fatalf("hand-written trigger lost its pin: %+v", got)
+	}
+}
+
+func TestDropWeakTail(t *testing.T) {
+	in := []Candidate{
+		{Card: store.StoredCard{Card: knowledge.Card{ID: "strong"}}, relevance: 0.030},
+		{Card: store.StoredCard{Card: knowledge.Card{ID: "close"}}, relevance: 0.020},
+		{Card: store.StoredCard{Card: knowledge.Card{ID: "weak"}}, relevance: 0.010},
+		{Card: store.StoredCard{Card: knowledge.Card{ID: "weak-pin"}}, relevance: 0.005, Pinned: true},
+	}
+	var ids []string
+	for _, c := range dropWeakTail(in) {
+		ids = append(ids, c.Card.ID)
+	}
+	if fmt.Sprint(ids) != "[strong close weak-pin]" {
+		t.Fatalf("kept %v", ids)
+	}
+}
+
+func TestBestArmRank(t *testing.T) {
+	bm := map[int64]int{1: 9, 2: 3}
+	cos := map[int64]int{1: 4}
+	if r := bestArmRank(1, bm, cos); r != 4 {
+		t.Errorf("rowid 1 = %d, want 4", r)
+	}
+	if r := bestArmRank(2, bm, nil); r != 3 {
+		t.Errorf("rowid 2 = %d, want 3", r)
+	}
+	if r := bestArmRank(3, bm, cos); r <= armDepth {
+		t.Errorf("absent rowid ranked %d", r)
 	}
 }

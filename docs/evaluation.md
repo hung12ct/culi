@@ -59,3 +59,22 @@ The suite keeps its failing cases; they are the useful part.
 
 Precision near 65% means about one injected card in three is not one the suite expected. Some of
 those are reasonable neighbours; others are noise the budget still pays for.
+
+## Real-prompt replay
+
+The fixture suite cannot show how retrieval behaves on a real, machine-grown store, so retrieval
+changes are also checked against a private replay: prompts typed into Claude Code over 12 days,
+run through `culi eval` with the cwd they were typed in, against a copy of a 667-card store (412
+live, mostly learned or generated). Every injected card was judged by hand as useful for that
+prompt or not. The prompts stay private; only the aggregates are published.
+
+The arm-depth rule and the relative floor (see `internal/retrieve/retrieve.go`) were chosen on a
+45-prompt tuning set and then checked on 30 prompts that played no part in choosing them:
+
+| Set | Useful cards / injected, before → after | Noise cards | Prompts with nothing relevant that still got cards |
+|---|---|---|---|
+| Tuning (45 prompts) | 17/39 (44%) → 18/30 (60%) | 22 → 12 | 5 → 2 |
+| Holdout (30 prompts) | 14/52 (27%) → 17/40 (43%) | 38 → 23 | 9 → 5 |
+
+Injected tokens per prompt fell by about a quarter. One person judged relevance, so treat the
+absolute numbers as indicative; the before/after direction is the result.
