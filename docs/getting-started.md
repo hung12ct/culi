@@ -5,21 +5,28 @@ This guide takes Culi from installation to its first useful context delivery.
 ## 1. Install
 
 ```bash
-go install github.com/hung12ct/culi/cmd/culi@latest
+curl -fsSL https://raw.githubusercontent.com/hung12ct/culi/main/install.sh | sh
 culi version
 ```
 
-Go installs the single `culi` binary into `GOBIN` (or the default Go bin directory). Culi itself
-does not require Node, Python, or a resident daemon.
+The script downloads the prebuilt binary for your OS and architecture, verifies its SHA-256
+against the release's `checksums.txt`, and installs it to `~/.local/bin`. Set `CULI_VERSION` to
+pin a release tag or `CULI_INSTALL_DIR` to choose the directory. On Windows, download
+`culi_windows_amd64.zip` from [Releases](https://github.com/hung12ct/culi/releases).
+
+Set `CULI_NO_INIT=1` to install without running `culi init`. To build from source instead, run
+`go install github.com/hung12ct/culi/cmd/culi@latest` (Go 1.25+). To remove culi later, run
+`culi uninstall` (add `--purge` to delete `~/.culi` too).
+Culi itself does not require Node, Python, or a resident daemon.
 
 Requirements:
-
-- Go 1.25+ for installation.
 - Claude Code with lifecycle hooks and MCP, and/or Codex CLI 0.145+.
 - Git, used to version `~/.culi/knowledge/`.
 - Ollama is optional; SQLite FTS/BM25 works without it.
 
 ## 2. Connect your coding agents
+
+The install script already ran this step. Run it again any time; it is idempotent:
 
 ```bash
 culi init

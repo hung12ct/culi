@@ -89,20 +89,7 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 		return sum, err
 	}
 	sum.Jobs = len(jobs)
-
-	// --no-cap: drain the whole backlog in one run. Zero caps disable the gate
-	// (see ledger.Allow), so this deliberately bypasses daily_usd_cap /
-	// daily_call_cap for this run only (cfg is our local copy).
-	if opts.IgnoreCaps {
-		cfg.Learn.DailyUSDCap = 0
-		cfg.Learn.DailyCallCap = 0
-		sum.Notes = append(sum.Notes, "caps ignored (--no-cap): draining the full backlog")
-	} else if lim := cfg.Learn.MaxJobsPerRun; lim > 0 && len(jobs) > lim {
-		// Mine only the newest N this run (jobs are newest-first); the rest wait
-		// for the next run or a --no-cap drain.
-		sum.Notes = append(sum.Notes, fmt.Sprintf("this run: %d newest of %d queued (learn.max_jobs_per_run; --no-cap for all)", lim, len(jobs)))
-		jobs = jobs[:lim]
-	}
+	jobs = applyRunLimits(&cfg, opts, jobs, &sum)
 
 	tier, desc, err := llmtier.Resolve(cfg.Learn, cfg.Ollama.Endpoint, stateDir)
 	if err != nil {
@@ -122,221 +109,313 @@ func Run(ctx context.Context, base string, cfg config.Config, opts Options, logf
 	}
 	defer s.Close()
 
-	e := embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive)
-	miner := &mine.Miner{
-		Base: base, Store: s, Tier: tier,
-		Emb: e, EmbModel: cfg.Ollama.Model, ConfirmAt: cfg.Learn.ConfirmAt, Logf: logf,
+	w := &worker{
+		base: base, cfg: cfg, opts: opts, logf: logf, store: s, tier: tier,
+		emb:     embed.NewOllama(cfg.Ollama.Endpoint, cfg.Ollama.Model, cfg.Ollama.KeepAlive),
+		cursors: queue.LoadCursors(stateDir), now: time.Now().UTC(), sum: sum,
 	}
-	cursors := queue.LoadCursors(stateDir)
-	now := time.Now().UTC()
-	fromStart := opts.FromStart
-
-	// prep filters a job to a mineable (cursor, ok); ok=false means nothing new
-	// (already marked Done). Runs in the main goroutine only.
-	prep := func(job queue.Job) (queue.Cursor, bool) {
-		st, err := os.Stat(job.TranscriptPath)
-		if err != nil {
-			sum.Notes = append(sum.Notes, fmt.Sprintf("transcript gone: %s", job.TranscriptPath))
-			_ = queue.Done(job)
-			return queue.Cursor{}, false
-		}
-		cur := cursors.Get(job.TranscriptPath)
-		if fromStart {
-			cur = queue.Cursor{}
-		}
-		if !queue.ShouldMine(cur, st.Size(), job.IsFinal(), now) {
-			_ = queue.Done(job) // nothing new since the last mine
-			return queue.Cursor{}, false
-		}
-		return cur, true
+	if opts.IgnoreCaps && len(jobs) > 1 {
+		w.mineParallel(ctx, jobs)
+	} else {
+		w.mineSerial(ctx, jobs)
 	}
+	w.afterMining(ctx)
+	return w.sum, nil
+}
 
-	// collect folds one finished mine into the summary and advances the cursor +
-	// queue. Always runs in the main goroutine, so sum/cursors need no locks.
-	// stop=true halts the run (caps/backend) leaving remaining jobs queued.
-	collect := func(job queue.Job, res mine.Result, newCur queue.Cursor, err error) (stop bool) {
-		sum.Usage.Add(res.Usage)
-		switch {
-		case errors.Is(err, llmtier.ErrCapped):
-			sum.Capped = true
-			sum.Notes = append(sum.Notes, firstNoteLine(err))
-			return true
-		case errors.Is(err, llmtier.ErrBackendUnavailable):
-			sum.BackendDown = true
-			sum.Notes = append(sum.Notes, firstNoteLine(err))
-			return true
-		case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
-			return false // run halted/timed out — leave the job queued, don't park
-		case err != nil:
-			parked, ferr := queue.Fail(job)
-			note := fmt.Sprintf("job %s failed: %v", job.SessionID, err)
-			if parked {
-				note += " (moved to inbox/failed)"
-			}
-			if ferr != nil {
-				note += " (" + ferr.Error() + ")"
-			}
-			sum.Notes = append(sum.Notes, note)
-			return false
-		}
-		// Parse-gated deletion: only after the result landed do cursor + job
-		// advance, in that order — a crash between the two re-mines (dedup
-		// absorbs it) rather than losing a region.
-		cursors.Set(job.TranscriptPath, newCur)
-		if err := cursors.Save(); err != nil {
-			sum.Notes = append(sum.Notes, err.Error())
-		}
+// applyRunLimits applies --no-cap or learn.max_jobs_per_run to this run.
+// cfg is the run's local copy, so zeroing its caps affects this run only.
+func applyRunLimits(cfg *config.Config, opts Options, jobs []queue.Job, sum *Summary) []queue.Job {
+	// --no-cap: drain the whole backlog in one run. Zero caps disable the gate
+	// (see ledger.Allow), so this deliberately bypasses daily_usd_cap /
+	// daily_call_cap for this run only.
+	if opts.IgnoreCaps {
+		cfg.Learn.DailyUSDCap = 0
+		cfg.Learn.DailyCallCap = 0
+		sum.Notes = append(sum.Notes, "caps ignored (--no-cap): draining the full backlog")
+		return jobs
+	}
+	if lim := cfg.Learn.MaxJobsPerRun; lim > 0 && len(jobs) > lim {
+		// Mine only the newest N this run (jobs are newest-first); the rest wait
+		// for the next run or a --no-cap drain.
+		sum.Notes = append(sum.Notes, fmt.Sprintf("this run: %d newest of %d queued (learn.max_jobs_per_run; --no-cap for all)", lim, len(jobs)))
+		return jobs[:lim]
+	}
+	return jobs
+}
+
+// worker is one learn run's shared state. Its methods run on the run's main
+// goroutine unless noted, so sum and cursors need no locks.
+type worker struct {
+	base    string
+	cfg     config.Config
+	opts    Options
+	logf    func(string, ...any)
+	store   *store.Store
+	tier    *llmtier.Tier
+	emb     embed.Embedder
+	cursors *queue.Cursors
+	now     time.Time
+	sum     Summary
+}
+
+func (w *worker) newMiner(writeMu *sync.Mutex) *mine.Miner {
+	return &mine.Miner{
+		Base: w.base, Store: w.store, Tier: w.tier, Emb: w.emb, EmbModel: w.cfg.Ollama.Model,
+		ConfirmAt: w.cfg.Learn.ConfirmAt, Logf: w.logf, WriteMu: writeMu,
+	}
+}
+
+// prep filters a job to a mineable cursor; ok=false means nothing new (the
+// job is already marked done).
+func (w *worker) prep(job queue.Job) (queue.Cursor, bool) {
+	st, err := os.Stat(job.TranscriptPath)
+	if err != nil {
+		w.sum.Notes = append(w.sum.Notes, fmt.Sprintf("transcript gone: %s", job.TranscriptPath))
 		_ = queue.Done(job)
-		if res.Windows == 0 {
-			sum.Clean++
-		} else {
-			sum.Mined++
-		}
-		sum.Created = append(sum.Created, res.Created...)
-		sum.Reinforced = append(sum.Reinforced, res.Reinforced...)
-		sum.Confirmed = append(sum.Confirmed, res.Confirmed...)
-		sum.Retired = append(sum.Retired, res.Retired...)
-		sum.Attributed += res.Attributed
-		sum.StyleObs += res.StyleObs
-		sum.Notes = append(sum.Notes, res.Notes...)
+		return queue.Cursor{}, false
+	}
+	cur := w.cursors.Get(job.TranscriptPath)
+	if w.opts.FromStart {
+		cur = queue.Cursor{}
+	}
+	if !queue.ShouldMine(cur, st.Size(), job.IsFinal(), w.now) {
+		_ = queue.Done(job) // nothing new since the last mine
+		return queue.Cursor{}, false
+	}
+	return cur, true
+}
+
+// collect folds one finished mine into the summary and advances the cursor
+// and queue. stop=true halts the run (caps/backend), leaving the remaining
+// jobs queued.
+func (w *worker) collect(job queue.Job, res mine.Result, newCur queue.Cursor, err error) (stop bool) {
+	w.sum.Usage.Add(res.Usage)
+	switch {
+	case errors.Is(err, llmtier.ErrCapped):
+		w.sum.Capped = true
+		w.sum.Notes = append(w.sum.Notes, firstNoteLine(err))
+		return true
+	case errors.Is(err, llmtier.ErrBackendUnavailable):
+		w.sum.BackendDown = true
+		w.sum.Notes = append(w.sum.Notes, firstNoteLine(err))
+		return true
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		return false // run halted/timed out — leave the job queued, don't park
+	case err != nil:
+		w.failJob(job, err)
 		return false
 	}
+	// Parse-gated deletion: only after the result landed do cursor + job
+	// advance, in that order — a crash between the two re-mines (dedup
+	// absorbs it) rather than losing a region.
+	w.cursors.Set(job.TranscriptPath, newCur)
+	if err := w.cursors.Save(); err != nil {
+		w.sum.Notes = append(w.sum.Notes, err.Error())
+	}
+	_ = queue.Done(job)
+	w.sum.addResult(res)
+	return false
+}
 
-	if opts.IgnoreCaps && len(jobs) > 1 {
-		// --no-cap parallel drain: fan out the LLM-heavy MineSession across a
-		// bounded pool, funnel the single-writer store writes through a shared
-		// WriteMu, and collect bookkeeping back here. Only worthwhile in bulk.
-		// Each worker gets its OWN Miner — MineSession keeps a per-session vec
-		// cache on the Miner, so sharing one would race; Store/Tier/Emb/WriteMu
-		// are concurrency-safe and shared.
-		writeMu := &sync.Mutex{}
-		newMiner := func() *mine.Miner {
-			return &mine.Miner{Base: base, Store: s, Tier: tier, Emb: e, EmbModel: cfg.Ollama.Model, ConfirmAt: cfg.Learn.ConfirmAt, Logf: logf, WriteMu: writeMu}
-		}
-		type task struct {
-			job queue.Job
-			cur queue.Cursor
-		}
-		var tasks []task
-		for _, job := range jobs {
-			if cur, ok := prep(job); ok {
-				tasks = append(tasks, task{job, cur})
-			}
-		}
-		type outcome struct {
-			job    queue.Job
-			res    mine.Result
-			newCur queue.Cursor
-			err    error
-		}
-		runCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		sem := make(chan struct{}, parallelDrainWorkers)
-		out := make(chan outcome, len(tasks))
-		var wg sync.WaitGroup
-		// Dispatch concurrently with collect so a halt (cancel) actually stops
-		// the remaining launches instead of racing them all out first.
-		go func() {
-			for _, t := range tasks {
-				if runCtx.Err() != nil {
-					break // halted — stop dispatching; remaining jobs stay queued
-				}
-				wg.Add(1)
-				sem <- struct{}{} // bound to parallelDrainWorkers in flight
-				go func(t task) {
-					defer wg.Done()
-					defer func() { <-sem }()
-					if runCtx.Err() != nil { // launched after a halt — don't spawn a call
-						out <- outcome{t.job, mine.Result{}, t.cur, runCtx.Err()}
-						return
-					}
-					res, newCur, err := newMiner().MineSession(runCtx, t.job, t.cur)
-					if runCtx.Err() != nil {
-						err = runCtx.Err() // killed mid-call ⇒ leave queued, don't park
-					}
-					out <- outcome{t.job, res, newCur, err}
-				}(t)
-			}
-			wg.Wait()
-			close(out)
-		}()
-		for o := range out {
-			if collect(o.job, o.res, o.newCur, o.err) {
-				cancel() // halt: stop remaining dispatch; in-flight jobs stay queued
-			}
-		}
+func (w *worker) failJob(job queue.Job, cause error) {
+	parked, ferr := queue.Fail(job, cause)
+	note := fmt.Sprintf("job %s failed (attempt %d): %v", job.SessionID, job.Attempts()+1, cause)
+	if parked {
+		note += " (moved to inbox/failed; see culi learn --failed)"
+	}
+	if ferr != nil {
+		note += " (" + ferr.Error() + ")"
+	}
+	w.sum.Notes = append(w.sum.Notes, note)
+}
+
+// addResult folds one successful mine into the summary.
+func (sum *Summary) addResult(res mine.Result) {
+	if res.Windows == 0 {
+		sum.Clean++
 	} else {
-		for _, job := range jobs {
-			cur, ok := prep(job)
-			if !ok {
-				continue
-			}
-			res, newCur, err := miner.MineSession(ctx, job, cur)
-			if collect(job, res, newCur, err) {
-				break
-			}
-		}
+		sum.Mined++
 	}
+	sum.Created = append(sum.Created, res.Created...)
+	sum.Reinforced = append(sum.Reinforced, res.Reinforced...)
+	sum.Confirmed = append(sum.Confirmed, res.Confirmed...)
+	sum.Retired = append(sum.Retired, res.Retired...)
+	sum.Attributed += res.Attributed
+	sum.StyleObs += res.StyleObs
+	sum.Notes = append(sum.Notes, res.Notes...)
+}
 
-	// Pipeline B: policy-gated style synthesis over the observations ledger.
-	// Skipped when the mining loop already hit the caps; its own call passes
-	// the same ledger either way.
-	if !sum.Capped && !sum.BackendDown {
-		synth := &style.Synthesizer{Base: base, Store: s, Tier: tier}
-		sres, err := synth.Run(ctx, opts.ForceStyle, time.Now().UTC())
-		sum.Style = sres
-		sum.Usage.Add(sres.Usage)
-		if err != nil && !errors.Is(err, llmtier.ErrCapped) {
-			sum.Notes = append(sum.Notes, "style synthesis: "+firstNoteLine(err))
+func (w *worker) mineSerial(ctx context.Context, jobs []queue.Job) {
+	miner := w.newMiner(nil)
+	for _, job := range jobs {
+		cur, ok := w.prep(job)
+		if !ok {
+			continue
+		}
+		res, newCur, err := miner.MineSession(ctx, job, cur)
+		if w.collect(job, res, newCur, err) {
+			return
 		}
 	}
+}
 
-	// Pipeline D: branch-tip pattern index over the configured repos. Tips
-	// comparison is milliseconds of git; unmoved repos cost nothing.
-	if !sum.Capped && !sum.BackendDown {
-		pr := &patterns.Runner{Base: base, Store: s, Tier: tier, Logf: logf}
-		pres, err := pr.Run(ctx, cfg.Repos)
-		sum.Patterns = pres
-		sum.Usage.Add(pres.Usage)
-		if err != nil {
-			sum.Notes = append(sum.Notes, "pattern index: "+firstNoteLine(err))
-		}
-	}
+type mineTask struct {
+	job queue.Job
+	cur queue.Cursor
+}
 
-	// Janitor: auto-retire mined candidates left unreinforced past the TTL.
-	// Zero-cost (local file ops, no backend), so it runs even after a cap hit.
-	// Only candidates are touched — dormant confirmed cards are reported by
-	// `culi stats`, never deleted (C4).
-	kdir := config.KnowledgeDir(base)
-	ttl := time.Duration(cfg.Learn.CandidateTTLDays) * 24 * time.Hour
-	if stale, err := mine.RetireStaleCandidates(ctx, s, kdir, ttl, time.Now().UTC()); err != nil {
-		sum.Notes = append(sum.Notes, "candidate janitor: "+firstNoteLine(err))
-	} else if len(stale) > 0 {
-		sum.Retired = append(sum.Retired, stale...)
-		sum.Notes = append(sum.Notes, fmt.Sprintf("%d stale candidate(s) auto-retired (>%dd unreinforced)",
-			len(stale), cfg.Learn.CandidateTTLDays))
-		if _, err := indexer.Sync(ctx, s, kdir); err != nil {
-			sum.Notes = append(sum.Notes, "janitor reindex: "+firstNoteLine(err))
-		}
-	}
+type mineOutcome struct {
+	job    queue.Job
+	res    mine.Result
+	newCur queue.Cursor
+	err    error
+}
 
-	// Vectors for anything new, so next run's dedup can use the embed arm.
-	if len(sum.Created)+len(sum.Style.Created)+len(sum.Patterns.Created) > 0 || len(sum.Reinforced) > 0 {
-		ectx, cancel := context.WithTimeout(ctx, embedBudget)
-		_, _ = indexer.EmbedMissing(ectx, s, e, cfg.Ollama.Model)
-		cancel()
-	}
-	// Governance trail: one aggregate commit per worker run (best-effort —
-	// history must never fail learning). A concurrent review/save_lesson
-	// commit may sweep this run's files under its own message; the change is
-	// still recorded, just labeled by the other actor — tolerated by design,
-	// do not add locking for it.
-	if msg := commitMessage(sum); msg != "" {
-		if err := knowledge.Commit(config.KnowledgeDir(base), msg); err != nil && logf != nil {
-			logf("learn: knowledge commit: %v", err)
+// mineParallel is the --no-cap drain: the LLM-heavy MineSession fans out
+// across a bounded pool, single-writer store writes funnel through a shared
+// WriteMu, and bookkeeping comes back here. Each task gets its own Miner —
+// MineSession keeps a per-session vector cache on it, so sharing one would
+// race; Store, Tier, Emb and WriteMu are safe to share.
+func (w *worker) mineParallel(ctx context.Context, jobs []queue.Job) {
+	var tasks []mineTask
+	for _, job := range jobs {
+		if cur, ok := w.prep(job); ok {
+			tasks = append(tasks, mineTask{job, cur})
 		}
 	}
-	return sum, nil
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	out := make(chan mineOutcome, len(tasks))
+	// Dispatch concurrently with collect so a halt (cancel) actually stops the
+	// remaining launches instead of racing them all out first.
+	go w.dispatch(runCtx, tasks, &sync.Mutex{}, out)
+	for o := range out {
+		if w.collect(o.job, o.res, o.newCur, o.err) {
+			cancel() // halt: stop remaining dispatch; in-flight jobs stay queued
+		}
+	}
+}
+
+// dispatch launches tasks with at most parallelDrainWorkers in flight and
+// closes out when all have reported. Runs on its own goroutine; it touches
+// no worker state besides the read-only miner fields.
+func (w *worker) dispatch(ctx context.Context, tasks []mineTask, writeMu *sync.Mutex, out chan<- mineOutcome) {
+	sem := make(chan struct{}, parallelDrainWorkers)
+	var wg sync.WaitGroup
+	for _, t := range tasks {
+		if ctx.Err() != nil {
+			break // halted — stop dispatching; remaining jobs stay queued
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(t mineTask) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			out <- w.mineOne(ctx, t, writeMu)
+		}(t)
+	}
+	wg.Wait()
+	close(out)
+}
+
+func (w *worker) mineOne(ctx context.Context, t mineTask, writeMu *sync.Mutex) mineOutcome {
+	if ctx.Err() != nil { // launched after a halt — don't spawn a call
+		return mineOutcome{t.job, mine.Result{}, t.cur, ctx.Err()}
+	}
+	res, newCur, err := w.newMiner(writeMu).MineSession(ctx, t.job, t.cur)
+	if ctx.Err() != nil {
+		err = ctx.Err() // killed mid-call ⇒ leave queued, don't park
+	}
+	return mineOutcome{t.job, res, newCur, err}
+}
+
+// afterMining runs the pipelines that follow transcript mining: style
+// synthesis and the branch pattern index (skipped after a cap or backend
+// halt), then the zero-cost janitor, vectors for new cards, and the commit.
+func (w *worker) afterMining(ctx context.Context) {
+	if !w.sum.Capped && !w.sum.BackendDown {
+		w.synthesizeStyle(ctx)
+		w.indexPatterns(ctx)
+	}
+	w.retireStale(ctx)
+	w.embedNew(ctx)
+	w.commit()
+}
+
+// synthesizeStyle is pipeline B: policy-gated style synthesis over the
+// observations ledger.
+func (w *worker) synthesizeStyle(ctx context.Context) {
+	synth := &style.Synthesizer{Base: w.base, Store: w.store, Tier: w.tier}
+	sres, err := synth.Run(ctx, w.opts.ForceStyle, time.Now().UTC())
+	w.sum.Style = sres
+	w.sum.Usage.Add(sres.Usage)
+	if err != nil && !errors.Is(err, llmtier.ErrCapped) {
+		w.sum.Notes = append(w.sum.Notes, "style synthesis: "+firstNoteLine(err))
+	}
+}
+
+// indexPatterns is pipeline D: the branch-tip pattern index over the
+// configured repos. Comparing tips is milliseconds of git; unmoved repos cost
+// nothing.
+func (w *worker) indexPatterns(ctx context.Context) {
+	pr := &patterns.Runner{Base: w.base, Store: w.store, Tier: w.tier, Logf: w.logf}
+	pres, err := pr.Run(ctx, w.cfg.Repos)
+	w.sum.Patterns = pres
+	w.sum.Usage.Add(pres.Usage)
+	if err != nil {
+		w.sum.Notes = append(w.sum.Notes, "pattern index: "+firstNoteLine(err))
+	}
+}
+
+// retireStale auto-retires mined candidates left unreinforced past the TTL.
+// Zero-cost (local file ops, no backend), so it runs even after a cap hit.
+// Only candidates are touched — dormant confirmed cards are reported by
+// `culi stats`, never deleted (C4).
+func (w *worker) retireStale(ctx context.Context) {
+	kdir := config.KnowledgeDir(w.base)
+	ttl := time.Duration(w.cfg.Learn.CandidateTTLDays) * 24 * time.Hour
+	stale, err := mine.RetireStaleCandidates(ctx, w.store, kdir, ttl, time.Now().UTC())
+	if err != nil {
+		w.sum.Notes = append(w.sum.Notes, "candidate janitor: "+firstNoteLine(err))
+		return
+	}
+	if len(stale) == 0 {
+		return
+	}
+	w.sum.Retired = append(w.sum.Retired, stale...)
+	w.sum.Notes = append(w.sum.Notes, fmt.Sprintf("%d stale candidate(s) auto-retired (>%dd unreinforced)",
+		len(stale), w.cfg.Learn.CandidateTTLDays))
+	if _, err := indexer.Sync(ctx, w.store, kdir); err != nil {
+		w.sum.Notes = append(w.sum.Notes, "janitor reindex: "+firstNoteLine(err))
+	}
+}
+
+// embedNew computes vectors for anything new, so the next run's dedup can use
+// the embedding arm.
+func (w *worker) embedNew(ctx context.Context) {
+	sum := w.sum
+	if len(sum.Created)+len(sum.Style.Created)+len(sum.Patterns.Created) == 0 && len(sum.Reinforced) == 0 {
+		return
+	}
+	ectx, cancel := context.WithTimeout(ctx, embedBudget)
+	defer cancel()
+	_, _ = indexer.EmbedMissing(ectx, w.store, w.emb, w.cfg.Ollama.Model)
+}
+
+// commit records one aggregate governance commit per worker run
+// (best-effort — history must never fail learning). A concurrent review or
+// save_lesson commit may sweep this run's files under its own message; the
+// change is still recorded, just labeled by the other actor — tolerated by
+// design, do not add locking for it.
+func (w *worker) commit() {
+	msg := commitMessage(w.sum)
+	if msg == "" {
+		return
+	}
+	if err := knowledge.Commit(config.KnowledgeDir(w.base), msg); err != nil && w.logf != nil {
+		w.logf("learn: knowledge commit: %v", err)
+	}
 }
 
 // commitMessage summarizes one run's knowledge changes; "" when nothing

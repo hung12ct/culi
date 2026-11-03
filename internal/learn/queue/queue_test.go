@@ -1,8 +1,10 @@
 package queue
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +39,7 @@ func TestListDoneFailLadder(t *testing.T) {
 
 	// Fail twice: renamed with .f1 then .f2, attempts parsed back on List.
 	for want := 1; want <= 2; want++ {
-		parked, err := Fail(j)
+		parked, err := Fail(j, errors.New("boom"))
 		if err != nil || parked {
 			t.Fatalf("fail %d: parked=%v err=%v", want, parked, err)
 		}
@@ -48,10 +50,17 @@ func TestListDoneFailLadder(t *testing.T) {
 		j = jobs[0]
 	}
 
-	// Third failure parks the job in failed/.
-	parked, err := Fail(j)
+	if j.LastError != "boom" || j.FailedAt == "" {
+		t.Fatalf("retry file lost the cause: %+v", j)
+	}
+
+	// Third failure parks the job in failed/, with the cause recorded.
+	parked, err := Fail(j, errors.New("final cause"))
 	if err != nil || !parked {
 		t.Fatalf("third fail: parked=%v err=%v", parked, err)
+	}
+	if got, _ := Failed(dir); len(got) != 1 || got[0].LastError != "final cause" || got[0].SessionID != "s1" {
+		t.Fatalf("parked job = %+v", got)
 	}
 	if jobs, _ = List(dir); len(jobs) != 0 {
 		t.Fatalf("parked job still listed: %+v", jobs)
@@ -215,5 +224,64 @@ func TestLegacyJobDefaults(t *testing.T) {
 	j = Job{Source: harness.Codex, Trigger: "stop"}
 	if j.EffectiveSource() != harness.Codex || j.IsFinal() {
 		t.Fatalf("codex stop: source=%q final=%v", j.EffectiveSource(), j.IsFinal())
+	}
+}
+
+func TestFailTruncatesLongCause(t *testing.T) {
+	dir := t.TempDir()
+	writeJob(t, dir, "aaaa.json", "/tmp/a.jsonl")
+	jobs, _ := List(dir)
+	if _, err := Fail(jobs[0], errors.New(strings.Repeat("x", 5000))); err != nil {
+		t.Fatal(err)
+	}
+	jobs, _ = List(dir)
+	if n := len(jobs[0].LastError); n > maxErrorLen+len("…") {
+		t.Fatalf("cause not truncated: %d bytes", n)
+	}
+}
+
+func TestFailedRetryClear(t *testing.T) {
+	dir := t.TempDir()
+	failed := filepath.Join(dir, "failed")
+	if err := os.MkdirAll(failed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	live := filepath.Join(dir, "live.jsonl")
+	if err := os.WriteFile(live, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeJob(t, failed, "aaaa.json.f2", live)                             // retryable
+	writeJob(t, failed, "bbbb.json.f2", filepath.Join(dir, "gone.jsonl")) // transcript deleted
+	if err := os.WriteFile(filepath.Join(failed, "cccc.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	parked, err := Failed(dir)
+	if err != nil || len(parked) != 3 {
+		t.Fatalf("Failed = %+v, %v", parked, err)
+	}
+	states := map[string]Parked{}
+	for _, p := range parked {
+		states[p.File] = p
+	}
+	if !states["aaaa.json.f2"].TranscriptExists || states["bbbb.json.f2"].TranscriptExists || !states["cccc.json"].Malformed {
+		t.Fatalf("states = %+v", states)
+	}
+
+	n, err := RetryFailed(dir)
+	if err != nil || n != 1 {
+		t.Fatalf("RetryFailed = %d, %v", n, err)
+	}
+	jobs, _ := List(dir)
+	if len(jobs) != 1 || jobs[0].Attempts() != 0 || jobs[0].TranscriptPath != live {
+		t.Fatalf("requeued = %+v", jobs)
+	}
+
+	n, err = ClearFailed(dir)
+	if err != nil || n != 2 {
+		t.Fatalf("ClearFailed = %d, %v", n, err)
+	}
+	if left, _ := Failed(dir); len(left) != 0 {
+		t.Fatalf("left after clear: %+v", left)
 	}
 }

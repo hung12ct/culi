@@ -147,6 +147,15 @@ failure does not consume the call cap and stops the batch with jobs still queued
 is recorded even when its output later fails validation because the provider already billed or
 consumed quota for it.
 
+## Privacy
+
+Learning reads transcripts and sends excerpts to the configured backend. Before that, every entry
+is redacted: anything between `<private>` and `</private>` is removed (an unclosed tag hides the
+rest of the message), and credential-shaped strings such as `sk-…`, `ghp_…`, `AKIA…`, Slack and
+Google keys, bearer tokens and PEM private keys become `[redacted]`. Wrap anything you never want
+learned in `<private>` tags. Use `ollama` or `none` as the provider to keep transcripts on the
+machine entirely.
+
 ## Manual commands
 
 ```bash
@@ -180,6 +189,19 @@ tail -50 ~/.culi/logs/hook.log
 culi stats
 culi doctor --harness=codex
 ```
+
+### Failed jobs
+
+A job that fails three times is parked in `~/.culi/inbox/failed/` with the last error and its time.
+Parked jobs are pointers to transcripts; clearing them never deletes session content.
+
+```bash
+culi learn --failed         # list parked jobs, the recorded reason, and whether the transcript still exists
+culi learn --retry-failed   # requeue the ones whose transcript still exists
+culi learn --clear-failed   # drop all parked jobs
+```
+
+Claude Code deletes old transcripts, so a job parked long ago may no longer be retryable.
 
 Expected non-errors include gate skips for short/acknowledgement/non-novel sessions and throttled
 Codex scans. Backend-down errors keep work queued. Scanner errors and health paths are scrubbed of

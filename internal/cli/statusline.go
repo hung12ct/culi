@@ -75,7 +75,7 @@ func statuslineText(ctx context.Context, sessionID string) (string, error) {
 			parts = append(parts, fmt.Sprintf("%d tok this session", tok))
 		}
 	}
-	if sessions, err := s.SessionCount(ctx); err == nil && sessions > 0 && corpusTok > 0 {
+	if sessions, err := s.SessionCount(ctx); err == nil && sessions > 0 {
 		injected := 0
 		if aggs, err := s.InjectionAggs(ctx); err == nil {
 			for _, a := range aggs {
@@ -86,8 +86,8 @@ func statuslineText(ctx context.Context, sessionID string) (string, error) {
 				}
 			}
 		}
-		if cf := computeCounterfactual(sessions, corpusTok, injected); cf.SavedPercent > 0 {
-			parts = append(parts, fmt.Sprintf("saved ~%.0f%% (7d)", cf.SavedPercent))
+		if d := computeDelivery(sessions, corpusTok, injected); d.PerSession > 0 {
+			parts = append(parts, fmt.Sprintf("~%s tok/session (7d)", compactTokens(d.PerSession)))
 		}
 	}
 	if candidates > 0 {
@@ -112,4 +112,16 @@ func countFailedJobs(base string) int {
 		}
 	}
 	return n
+}
+
+// compactTokens renders a token count for the narrow statusline: 850, 1.3k, 12k.
+func compactTokens(n int) string {
+	switch {
+	case n >= 9_950: // would round to "10.0k"
+		return fmt.Sprintf("%dk", (n+500)/1000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }

@@ -14,7 +14,7 @@ import (
 )
 
 // Serve runs the local review console (plan §5): a web UI over the knowledge
-// store for candidate triage, KB browsing, and token-savings/job-health
+// store for candidate triage, KB browsing, and context-delivery/job-health
 // dashboards. It is off every hot path — a convenience surface, not part of
 // hook or MCP serving — so it opens the store read-mostly and reuses the same
 // mine/index/knowledge functions `culi review` does for its few writes.

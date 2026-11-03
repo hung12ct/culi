@@ -129,7 +129,6 @@ func (s *server) buildAnalytics(ctx context.Context, filter analyticsFilter) (an
 	if err != nil {
 		return analyticsPayload{}, err
 	}
-
 	metaByID := make(map[string]store.StoredCard, len(meta))
 	for _, card := range meta {
 		metaByID[card.ID] = card
@@ -142,30 +141,65 @@ func (s *server) buildAnalytics(ctx context.Context, filter analyticsFilter) (an
 	cardStats, _ := s.store.AllCardStats(ctx, time.Now().UTC())
 	windowUsage, _ := s.store.CardWindowUsage(ctx)
 
-	// Options describe the complete window, not only the currently filtered
-	// result, so changing one filter never makes the other options disappear.
-	reposByKey := map[string]analyticsRepo{}
-	harnessSet := map[string]struct{}{
-		harness.Claude.String(): {},
-		harness.Codex.String():  {},
+	opts := indexAnalyticsRows(rows)
+	byCard, sessions := accumulateAnalytics(rows, opts.repoByRow, filter)
+
+	payload := analyticsPayload{
+		Available: true,
+		Range:     "Last 7 days",
+		Harnesses: harnessOptions(opts.harnesses),
+		Repos:     sortedRepos(opts.repos),
 	}
-	repoCache := map[string]repoIdentity{}
-	repoByRow := make([]repoIdentity, len(rows))
+	payload.Summary.Sessions = sessions
+	for id, a := range byCard {
+		eff := store.ClassifyEffectiveness(cardStats[id], windowUsage[id])
+		card := analyticsCardFor(id, a, eff, payload.Harnesses)
+		if m, ok := metaByID[id]; ok {
+			card.withMeta(m)
+		}
+		payload.Summary.tally(card)
+		payload.Cards = append(payload.Cards, card)
+	}
+	payload.Summary.ActiveCards = len(payload.Cards)
+	sortAnalyticsCards(payload.Cards)
+	return payload, nil
+}
+
+// analyticsOptions describes the complete window, not only the filtered
+// result, so changing one filter never makes the other options disappear.
+type analyticsOptions struct {
+	repoByRow []repoIdentity // resolved repo for each row, by index
+	repos     map[string]analyticsRepo
+	harnesses map[string]struct{}
+}
+
+func indexAnalyticsRows(rows []store.InjectionRow) analyticsOptions {
+	opts := analyticsOptions{
+		repoByRow: make([]repoIdentity, len(rows)),
+		repos:     map[string]analyticsRepo{},
+		harnesses: map[string]struct{}{harness.Claude.String(): {}, harness.Codex.String(): {}},
+	}
+	cache := map[string]repoIdentity{}
 	for i, row := range rows {
-		repo, ok := repoCache[row.Cwd]
+		repo, ok := cache[row.Cwd]
 		if !ok {
 			repo = resolveRepo(row.Cwd)
-			repoCache[row.Cwd] = repo
+			cache[row.Cwd] = repo
 		}
-		repoByRow[i] = repo
-		reposByKey[repo.Key] = analyticsRepo(repo)
+		opts.repoByRow[i] = repo
+		opts.repos[repo.Key] = analyticsRepo(repo)
 		if row.Harness != "" {
-			harnessSet[row.Harness] = struct{}{}
+			opts.harnesses[row.Harness] = struct{}{}
 		}
 	}
+	return opts
+}
 
+// accumulateAnalytics folds the filtered rows per card and counts the
+// distinct sessions they came from.
+func accumulateAnalytics(rows []store.InjectionRow, repoByRow []repoIdentity, filter analyticsFilter) (map[string]*analyticsAccumulator, int) {
 	byCard := map[string]*analyticsAccumulator{}
-	summarySessions := map[string]struct{}{}
+	sessions := map[string]struct{}{}
 	for i, row := range rows {
 		repo := repoByRow[i]
 		if filter.Harness != "" && filter.Harness != "all" && row.Harness != filter.Harness {
@@ -183,104 +217,111 @@ func (s *server) buildAnalytics(ctx context.Context, filter analyticsFilter) (an
 			}
 			byCard[row.CardID] = a
 		}
-		a.sessions[row.SessionID] = struct{}{}
-		a.deliveries++
-		a.tokens += row.Tokens
-		if row.TS > a.lastUsed {
-			a.lastUsed = row.TS
-		}
-		a.repos[repo.Label] = struct{}{}
-		h := a.harnesses[row.Harness]
-		if h == nil {
-			h = &analyticsSlice{sessions: map[string]struct{}{}}
-			a.harnesses[row.Harness] = h
-		}
-		h.sessions[row.SessionID] = struct{}{}
-		h.deliveries++
-		h.tokens += row.Tokens
-		summarySessions[row.SessionID] = struct{}{}
+		a.add(row, repo)
+		sessions[row.SessionID] = struct{}{}
 	}
+	return byCard, len(sessions)
+}
 
-	payload := analyticsPayload{
-		Available: true,
-		Range:     "Last 7 days",
-		Harnesses: harnessOptions(harnessSet),
+func (a *analyticsAccumulator) add(row store.InjectionRow, repo repoIdentity) {
+	a.sessions[row.SessionID] = struct{}{}
+	a.deliveries++
+	a.tokens += row.Tokens
+	if row.TS > a.lastUsed {
+		a.lastUsed = row.TS
 	}
-	for _, repo := range reposByKey {
-		payload.Repos = append(payload.Repos, repo)
+	a.repos[repo.Label] = struct{}{}
+	h := a.harnesses[row.Harness]
+	if h == nil {
+		h = &analyticsSlice{sessions: map[string]struct{}{}}
+		a.harnesses[row.Harness] = h
 	}
-	sort.Slice(payload.Repos, func(i, j int) bool {
-		if payload.Repos[i].Label != payload.Repos[j].Label {
-			return payload.Repos[i].Label < payload.Repos[j].Label
+	h.sessions[row.SessionID] = struct{}{}
+	h.deliveries++
+	h.tokens += row.Tokens
+}
+
+// sortedRepos lists the window's repos by label. Empty yields nil, which the
+// console already renders as "no repos".
+func sortedRepos(byKey map[string]analyticsRepo) []analyticsRepo {
+	var repos []analyticsRepo
+	for _, repo := range byKey {
+		repos = append(repos, repo)
+	}
+	sort.Slice(repos, func(i, j int) bool {
+		if repos[i].Label != repos[j].Label {
+			return repos[i].Label < repos[j].Label
 		}
-		return payload.Repos[i].Key < payload.Repos[j].Key
+		return repos[i].Key < repos[j].Key
 	})
+	return repos
+}
 
-	payload.Summary.Sessions = len(summarySessions)
-	for id, a := range byCard {
-		card := analyticsCard{
-			ID:          id,
-			Title:       id,
-			Type:        "unknown",
-			Status:      "unavailable",
-			Available:   false,
-			Sessions:    len(a.sessions),
-			Deliveries:  a.deliveries,
-			Tokens:      a.tokens,
-			LastUsed:    humanizeTime(a.lastUsed),
-			lastUsedRaw: a.lastUsed,
-		}
-		eff := store.ClassifyEffectiveness(cardStats[id], windowUsage[id])
-		card.Bucket = eff.Bucket
-		if eff.PullRate > 0 {
-			card.PullRate = fmt.Sprintf("%.0f%%", 100*eff.PullRate)
-		}
-		switch eff.Bucket {
-		case store.EffHelpful:
-			payload.Summary.Helpful++
-		case store.EffNoisy:
-			payload.Summary.Noisy++
-		case store.EffExpensive:
-			payload.Summary.Expensive++
-		default:
-			payload.Summary.Uncertain++
-		}
-		if m, ok := metaByID[id]; ok {
-			card.Short = m.ShortID
-			card.Title = m.Title
-			card.Type = m.Type
-			card.Status = m.Status
-			card.ScopeLabels = append([]string(nil), m.Scopes...)
-			card.Available = true
-		}
-		for code, slice := range a.harnesses {
-			label := code
-			for _, option := range payload.Harnesses {
-				if option.Code == code {
-					label = option.Label
-					break
-				}
-			}
-			card.Harnesses = append(card.Harnesses, analyticsHarness{
-				Code: code, Label: label, Sessions: len(slice.sessions),
-				Deliveries: slice.deliveries, Tokens: slice.tokens,
-			})
-		}
-		sort.Slice(card.Harnesses, func(i, j int) bool { return card.Harnesses[i].Code < card.Harnesses[j].Code })
-		for repo := range a.repos {
-			card.Repos = append(card.Repos, repo)
-		}
-		sort.Strings(card.Repos)
-		payload.Cards = append(payload.Cards, card)
-		payload.Summary.Deliveries += card.Deliveries
-		payload.Summary.Tokens += card.Tokens
-		if len(card.Harnesses) > 1 {
-			payload.Summary.CrossHarnessCards++
-		}
+// analyticsCardFor builds one card row from its accumulator. Without card
+// metadata (a card deleted since it was injected) it stays "unavailable".
+func analyticsCardFor(id string, a *analyticsAccumulator, eff store.Effectiveness, options []harnessOpt) analyticsCard {
+	card := analyticsCard{
+		ID: id, Title: id, Type: "unknown", Status: "unavailable",
+		Sessions: len(a.sessions), Deliveries: a.deliveries, Tokens: a.tokens,
+		LastUsed: humanizeTime(a.lastUsed), lastUsedRaw: a.lastUsed, Bucket: eff.Bucket,
 	}
-	payload.Summary.ActiveCards = len(payload.Cards)
-	sort.Slice(payload.Cards, func(i, j int) bool {
-		a, b := payload.Cards[i], payload.Cards[j]
+	if eff.PullRate > 0 {
+		card.PullRate = fmt.Sprintf("%.0f%%", 100*eff.PullRate)
+	}
+	for code, slice := range a.harnesses {
+		label := code
+		for _, option := range options {
+			if option.Code == code {
+				label = option.Label
+				break
+			}
+		}
+		card.Harnesses = append(card.Harnesses, analyticsHarness{
+			Code: code, Label: label, Sessions: len(slice.sessions),
+			Deliveries: slice.deliveries, Tokens: slice.tokens,
+		})
+	}
+	sort.Slice(card.Harnesses, func(i, j int) bool { return card.Harnesses[i].Code < card.Harnesses[j].Code })
+	for repo := range a.repos {
+		card.Repos = append(card.Repos, repo)
+	}
+	sort.Strings(card.Repos)
+	return card
+}
+
+func (c *analyticsCard) withMeta(m store.StoredCard) {
+	c.Short = m.ShortID
+	c.Title = m.Title
+	c.Type = m.Type
+	c.Status = m.Status
+	c.ScopeLabels = append([]string(nil), m.Scopes...)
+	c.Available = true
+}
+
+// tally adds one card to the window totals and its effectiveness bucket.
+func (sum *analyticsSummary) tally(card analyticsCard) {
+	switch card.Bucket {
+	case store.EffHelpful:
+		sum.Helpful++
+	case store.EffNoisy:
+		sum.Noisy++
+	case store.EffExpensive:
+		sum.Expensive++
+	default:
+		sum.Uncertain++
+	}
+	sum.Deliveries += card.Deliveries
+	sum.Tokens += card.Tokens
+	if len(card.Harnesses) > 1 {
+		sum.CrossHarnessCards++
+	}
+}
+
+// sortAnalyticsCards orders by sessions, then deliveries, then recency, then
+// title, so the most widely useful cards lead.
+func sortAnalyticsCards(cards []analyticsCard) {
+	sort.Slice(cards, func(i, j int) bool {
+		a, b := cards[i], cards[j]
 		if a.Sessions != b.Sessions {
 			return a.Sessions > b.Sessions
 		}
@@ -292,5 +333,4 @@ func (s *server) buildAnalytics(ctx context.Context, filter analyticsFilter) (an
 		}
 		return a.Title < b.Title
 	})
-	return payload, nil
 }

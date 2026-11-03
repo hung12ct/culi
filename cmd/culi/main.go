@@ -21,6 +21,7 @@ Usage:
   culi mcp                      MCP stdio server (spawned by Claude Code; internal)
   culi index [--full]           sync knowledge/ into the index + embed changed cards
   culi query [--timing] <text>  debug retrieval from the terminal
+  culi eval --suite FILE        score retrieval on labeled prompts (hit rate, MRR, abstain)
   culi card list|show|rm <id>   inspect the card store
   culi card dupes [--retire]    find (and retire) cards that duplicate each other
   culi down <id>                downvote a card (ranks lower, never removed)
@@ -30,7 +31,8 @@ Usage:
   culi review [--list]          approve/reject mined candidate cards
   culi gen [--repo X] [--target claude|codex|both]  git history → instructions + repo cards
   culi stats [--json]           token accounting, gate economics, learning spend
-  culi doctor [--harness=codex] verify local harness wiring and recent activity
+  culi doctor [--harness=X]     check store, Ollama, learning and harness wiring, with fixes
+  culi uninstall [--purge]      remove culi's hooks, statusline and MCP entries (keeps ~/.culi)
   culi serve [--addr host:port] local web review console (default localhost:7378)
   culi statusline               Claude Code statusLine segment (stdin JSON; internal)
   culi version                  print the running build's version + git commit
@@ -55,6 +57,8 @@ func main() {
 		exit(cli.Index(os.Args[2:]))
 	case "query":
 		exit(cli.Query(os.Args[2:]))
+	case "eval":
+		exit(cli.Eval(os.Args[2:]))
 	case "card":
 		exit(cli.Card(os.Args[2:]))
 	case "import":
@@ -71,6 +75,8 @@ func main() {
 		exit(cli.Stats(os.Args[2:]))
 	case "doctor":
 		exit(cli.Doctor(os.Args[2:]))
+	case "uninstall":
+		exit(cli.Uninstall(os.Args[2:]))
 	case "serve":
 		exit(cli.Serve(os.Args[2:]))
 	case "statusline":

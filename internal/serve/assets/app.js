@@ -232,7 +232,7 @@ function renderStrip() {
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   set('s-version', st.version || '—');
   set('s-cards', st.cards != null ? st.cards : '—');
-  set('s-saved', st.savedPct != null ? st.savedPct : '—');
+  set('s-saved', st.perSession != null ? st.perSession : '—');
   set('s-review', (state.candidates ? state.candidates.length : (st.toReview != null ? st.toReview : '—')));
   set('s-learn', st.toLearn != null ? st.toLearn : '—');
   const dot = document.getElementById('serve-dot');
@@ -339,7 +339,7 @@ function homeAnalytics() {
 function screenOverview() {
   const o = state.overview || SEED.overview;
   const st = state.status || {};
-  const cf = o.cf || { injected: 0, sessions: 0, vsAll: 0 };
+  const dl = o.delivery || { injected: 0, sessions: 0, corpus: 0, share: '—' };
   // Go marshals empty slices as JSON null (not []), so any of these can arrive
   // null from /api/overview. Guard every .map — one throw here aborts
   // renderScreen() *after* renderHeader() ran, leaving the previous screen's
@@ -352,7 +352,7 @@ function screenOverview() {
   const g = o.granularity;
   const failedCount = (o.failedJobs || []).length;
   const reviewCount = (state.candidates || []).length || st.toReview || 0;
-  const hasInjectionHistory = Number(String(cf.sessions || 0).replace(/,/g, '')) > 0;
+  const hasInjectionHistory = Number(String(dl.sessions || 0).replace(/,/g, '')) > 0;
   const healthTitle = failedCount ? 'Learning needs attention' : 'Culi is working in the background';
   const healthCopy = failedCount
     ? 'Context delivery is still available. Check the failed learning job when you are ready.'
@@ -362,7 +362,7 @@ function screenOverview() {
       <div class="failed-head"><span class="ic">⚠</span><span class="tt">${o.failedJobs.length} failed job${o.failedJobs.length === 1 ? '' : 's'}</span></div>
       <div class="failed-line">${esc(o.failedJobs[0].kind)} — <span class="mono">${esc(o.failedJobs[0].at)}</span></div>
       <div class="failed-sub">${esc(o.failedJobs[0].reason)}</div>
-      <div class="failed-help mono">Run: culi learn</div>
+      <div class="failed-help mono">Details: culi learn --failed · retry: culi learn --retry-failed</div>
     </div>` : '';
   const noisy = (o.noisy || []).map(c => {
     const nm = c.short
@@ -392,10 +392,10 @@ function screenOverview() {
         </div>
       </div>
       <div class="efficiency">
-        <div class="efficiency-label">Context avoided · last 7 days</div>
+        <div class="efficiency-label">Context per session · last 7 days</div>
         ${hasInjectionHistory ? `
-          <div class="hero-num-row"><div class="hero-num">${esc(o.savedPct)}</div><div class="hero-spark">${trend}</div></div>
-          <div class="hero-cf" title="Culi compares targeted injection with loading the whole knowledge base every session."><b>${esc(cf.injected)}</b> tokens delivered across <b>${esc(cf.sessions)}</b> sessions instead of <b>${esc(cf.vsAll)}</b>.</div>
+          <div class="hero-num-row"><div class="hero-num">${esc(o.perSession)}<span class="faint"> tok</span></div><div class="hero-spark">${trend}</div></div>
+          <div class="hero-cf" title="Average tokens Culi injected per session, as a share of your live knowledge store."><b>${esc(dl.injected)}</b> tokens delivered across <b>${esc(dl.sessions)}</b> sessions — <b>${esc(dl.share)}</b> of your <b>${esc(dl.corpus)}</b>-token store per session.</div>
         ` : `
           <div class="efficiency-empty-title">No injection history yet</div>
           <div class="efficiency-empty-copy">This metric appears after Culi delivers relevant knowledge to Claude or Codex. Gate skips do not count as injections.</div>

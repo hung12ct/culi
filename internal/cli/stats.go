@@ -70,17 +70,19 @@ type retrievalReport struct {
 	Buckets        []store.InjectionAgg `json:"buckets,omitempty"`
 	GateSkipTotal  int                  `json:"gate_skip_total"`
 	GateSkips      map[string]int       `json:"gate_skips,omitempty"`
-	Counterfactual counterfactual       `json:"counterfactual"`
+	Delivery       delivery             `json:"delivery"`
 }
 
-// counterfactual estimates what the retention window would have cost if,
-// instead of culi's budgeted retrieval, every live card body were loaded at
-// every session start (the CLAUDE.md-dump baseline culi replaces).
-type counterfactual struct {
-	DumpTokens   int     `json:"dump_everything_tokens"`
+// delivery reports what culi actually put into context over the retention
+// window. It deliberately makes no "tokens saved" claim: culi cannot know
+// what a user would have loaded without it, and comparing against loading
+// the whole store every session (which nobody does) inflates any number.
+type delivery struct {
 	Injected     int     `json:"injected_tokens"`
-	SavedTokens  int     `json:"saved_tokens"`
-	SavedPercent float64 `json:"saved_percent"`
+	Sessions     int     `json:"sessions"`
+	PerSession   int     `json:"per_session_tokens"`
+	CorpusTokens int     `json:"corpus_tokens"`
+	CorpusShare  float64 `json:"corpus_share_percent"` // per-session injection as a % of the live store
 }
 
 type cardsReport struct {
@@ -120,6 +122,7 @@ type effCard struct {
 type learningReport struct {
 	InboxPending      int   `json:"inbox_pending"`
 	FailedJobs        int   `json:"failed_jobs"`
+	FailedRetryable   int   `json:"failed_retryable"`
 	StyleObservations int   `json:"style_observations"`
 	SpendToday        spend `json:"spend_today"`
 	Spend7d           spend `json:"spend_7d"`
@@ -137,7 +140,7 @@ func gather(ctx context.Context, s *store.Store, base string) report {
 	rep.Retrieval = gatherRetrieval(ctx, s, base)
 	rep.Cards = gatherCards(ctx, s)
 	rep.Learning = gatherLearning(base)
-	rep.Retrieval.Counterfactual = computeCounterfactual(
+	rep.Retrieval.Delivery = computeDelivery(
 		rep.Retrieval.Sessions, rep.Cards.CorpusBodyTokens,
 		rep.Retrieval.PromptTokens+rep.Retrieval.BaselineTokens)
 	return rep
@@ -163,21 +166,18 @@ func gatherRetrieval(ctx context.Context, s *store.Store, base string) retrieval
 	return r
 }
 
-// computeCounterfactual is the "is culi paying for itself" number: what the
-// window's sessions would have cost under load-everything-every-session,
-// versus what was actually injected. An estimate, not billing — chars/4
-// token estimates on both sides, and the dump baseline assumes one full load
-// per session.
-func computeCounterfactual(sessions, corpusBodyTok, injectedTok int) counterfactual {
-	cf := counterfactual{
-		DumpTokens: sessions * corpusBodyTok,
-		Injected:   injectedTok,
+// computeDelivery averages the window's injections per session and expresses
+// that average as a share of the live store — "how selective was culi", an
+// observable fact rather than a counterfactual. chars/4 token estimates.
+func computeDelivery(sessions, corpusBodyTok, injectedTok int) delivery {
+	d := delivery{Injected: injectedTok, Sessions: sessions, CorpusTokens: corpusBodyTok}
+	if sessions > 0 {
+		d.PerSession = (injectedTok + sessions/2) / sessions
 	}
-	cf.SavedTokens = cf.DumpTokens - cf.Injected
-	if cf.DumpTokens > 0 {
-		cf.SavedPercent = 100 * float64(cf.SavedTokens) / float64(cf.DumpTokens)
+	if corpusBodyTok > 0 {
+		d.CorpusShare = 100 * float64(d.PerSession) / float64(corpusBodyTok)
 	}
-	return cf
+	return d
 }
 
 func gatherCards(ctx context.Context, s *store.Store) cardsReport {
@@ -291,12 +291,11 @@ func gatherLearning(base string) learningReport {
 	if jobs, err := queue.List(config.InboxDir(base)); err == nil {
 		r.InboxPending = len(jobs)
 	}
-	if entries, err := os.ReadDir(filepath.Join(config.InboxDir(base), "failed")); err == nil {
-		for _, e := range entries {
-			// Only parked job files count — a stray .DS_Store must not trip
-			// the loud FAILED JOBS line.
-			if !e.IsDir() && strings.Contains(e.Name(), ".json") {
-				r.FailedJobs++
+	if parked, err := queue.Failed(config.InboxDir(base)); err == nil {
+		r.FailedJobs = len(parked)
+		for _, p := range parked {
+			if !p.Malformed && p.TranscriptExists {
+				r.FailedRetryable++
 			}
 		}
 	}
@@ -336,10 +335,9 @@ func renderText(rep report) {
 		fmt.Printf("  gate skips (7d)    %d prompts injected nothing for free — %s\n",
 			r.GateSkipTotal, strings.Join(reasons, ", "))
 	}
-	if cf := r.Counterfactual; cf.DumpTokens > 0 {
-		fmt.Printf("  savings estimate   injected %d tokens vs ~%d if your whole knowledge base loaded each session — saved ~%d (%.0f%%)\n",
-			cf.Injected, cf.DumpTokens, cf.SavedTokens, cf.SavedPercent)
-		fmt.Println("                     (baseline = the always-on CLAUDE.md dump; culi injects only per-prompt relevant cards)")
+	if d := r.Delivery; d.Sessions > 0 {
+		fmt.Printf("  delivered          %d tokens over %d sessions — ~%d per session (%.1f%% of the %d-token store)\n",
+			d.Injected, d.Sessions, d.PerSession, d.CorpusShare, d.CorpusTokens)
 	}
 	fmt.Println()
 
@@ -382,7 +380,7 @@ func renderText(rep report) {
 	fmt.Println("learning")
 	fmt.Printf("  inbox              %d pending\n", l.InboxPending)
 	if l.FailedJobs > 0 {
-		fmt.Printf("  FAILED JOBS        %d in inbox/failed — inspect them, these are bugs\n", l.FailedJobs)
+		fmt.Printf("  FAILED JOBS        %d parked (%d retryable) — see reasons: culi learn --failed\n", l.FailedJobs, l.FailedRetryable)
 	}
 	if l.StyleObservations > 0 {
 		fmt.Printf("  style observations %d\n", l.StyleObservations)

@@ -4,13 +4,13 @@
 
 const SEED = {
   status: {
-    cards: 140, version: 'v0.0.0-dev', savedPct: '~99%', toReview: 4, addr: 'localhost:7378',
+    cards: 140, version: 'v0.0.0-dev', perSession: '413', toReview: 4, addr: 'localhost:7378',
     spendToday: 0.14, spendCap: 1.0, failedJobs: 1, ollamaOffline: true, serveDown: false,
   },
   overview: {
-    savedPct: '~99%',
+    perSession: '413',
     trend: [30, 40, 36, 52, 46, 60, 55, 68, 64, 78, 74, 88],
-    cf: { injected: '24,397', sessions: '59', vsAll: '3.6M' },
+    delivery: { injected: '24,397', sessions: '59', corpus: '61K', share: '0.7%' },
     tiles: [
       { label: 'Cards', value: '140', sub: '84R · 10S · 25P · 14K · 7A', color: 'var(--metric-default)' },
       { label: 'To review', value: '4', sub: 'candidates queued', color: 'var(--metric-review)' },

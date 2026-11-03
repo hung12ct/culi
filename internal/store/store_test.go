@@ -214,6 +214,7 @@ func TestMigrateV2PreservesRuntimeData(t *testing.T) {
 		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
 		ALTER TABLE session_state DROP COLUMN attributed_at;
 		ALTER TABLE session_state DROP COLUMN penalized_at;
+		ALTER TABLE cards DROP COLUMN origin;
 		PRAGMA user_version = 2;
 	`); err != nil {
 		t.Fatal(err)
@@ -284,6 +285,7 @@ func TestMigrateV1AddsRuntimeAttribution(t *testing.T) {
 		CREATE INDEX idx_inj_session ON injections(session_id,card_id);
 		ALTER TABLE session_state DROP COLUMN attributed_at;
 		ALTER TABLE session_state DROP COLUMN penalized_at;
+		ALTER TABLE cards DROP COLUMN origin;
 		PRAGMA user_version = 1;
 	`); err != nil {
 		t.Fatal(err)
@@ -366,6 +368,7 @@ func TestMigrateV3PreservesRuntimeData(t *testing.T) {
 	if _, err := s.db.ExecContext(ctx, `
 		ALTER TABLE session_state DROP COLUMN attributed_at;
 		ALTER TABLE session_state DROP COLUMN penalized_at;
+		ALTER TABLE cards DROP COLUMN origin;
 		PRAGMA user_version = 3;
 	`); err != nil {
 		t.Fatal(err)
@@ -408,5 +411,48 @@ func TestMigrateV3PreservesRuntimeData(t *testing.T) {
 	}
 	if !claimed {
 		t.Error("migrated row should still be claimable")
+	}
+}
+
+// v6 adds cards.origin. Existing rows cannot know their provenance until the
+// card file is re-read, so the migration must zero mtime to force that resync.
+func TestMigrateV5AddsOriginAndForcesResync(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "index.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := knowledge.Card{ID: "lessons/a", Path: "lessons/a.md", Type: "lesson", Title: "A", Summary: "a",
+		Body: "a", Scopes: []string{"global"}, ContentHash: "h",
+		Provenance: &knowledge.Provenance{Source: "learn"}}
+	if err := s.UpsertCard(ctx, c, 123, 10); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.AllCardsMeta(ctx)
+	if err != nil || len(got) != 1 || got[0].Origin != "learn" || !got[0].MachineAuthored() {
+		t.Fatalf("origin not stored: %+v %v", got, err)
+	}
+	if _, err := s.db.ExecContext(ctx, "ALTER TABLE cards DROP COLUMN origin; PRAGMA user_version = 5;"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen v5 store: %v", err)
+	}
+	defer s2.Close()
+	states, err := s2.FileStates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st := states["lessons/a.md"]; st.MTime != 0 {
+		t.Fatalf("mtime = %d, want 0 so the next sync re-reads the card", st.MTime)
+	}
+	if got, _ := s2.AllCardsMeta(ctx); len(got) != 1 || got[0].Origin != "" {
+		t.Fatalf("migrated row = %+v", got)
 	}
 }
