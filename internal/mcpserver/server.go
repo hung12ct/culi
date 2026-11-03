@@ -20,7 +20,9 @@ const serverVersion = "0.3.0"
 const instructions = `culi serves the user's canonical knowledge store (rules, lessons, styles,
 patterns, skills). Lines starting with ▸ in injected <ctx> blocks are pointers:
 call expand_card with the 4-hex ID to pull the full content. Call search_context
-when you need guidance that was not pushed. Call save_lesson when the user asks
+when you need guidance that was not pushed: it returns compact summaries with
+each card's token cost, so expand only the ones you need, several at once via
+expand_card ids. Call save_lesson when the user asks
 to remember something durable.`
 
 // Server owns the long-lived handles for one MCP session (Claude Code spawns
@@ -62,13 +64,13 @@ func (s *Server) MCP() *mcp.Server {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search_context",
 		Description: "Search the user's canonical knowledge store (rules, lessons, styles, " +
-			"patterns) with hybrid BM25+embedding retrieval. Returns card summaries with IDs; " +
-			"use expand_card for full content.",
+			"patterns) with hybrid BM25+embedding retrieval. Returns compact card summaries with IDs " +
+			"and each card's token cost; then expand only the relevant ones with expand_card.",
 	}, s.searchContext)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "expand_card",
-		Description: "Fetch a card's full body (and attachment file paths for skills) by card " +
-			"ID or the 4-hex short ID shown after ▸ in injected context.",
+		Description: "Fetch full card bodies (and attachment file paths for skills) by card ID or " +
+			"the 4-hex short ID shown after ▸ in injected context. Pass ids to fetch up to 10 in one call.",
 	}, s.expandCard)
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "save_lesson",

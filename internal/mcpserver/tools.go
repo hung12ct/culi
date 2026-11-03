@@ -34,6 +34,7 @@ type searchHit struct {
 	Title   string  `json:"title"`
 	Summary string  `json:"summary"`
 	Score   float64 `json:"score"`
+	Tokens  int     `json:"tokens"` // estimated cost of expanding this card's body
 }
 
 type searchOut struct {
@@ -60,7 +61,7 @@ func (s *Server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, in s
 	for _, c := range cands {
 		out.Results = append(out.Results, searchHit{
 			ID: c.Card.ID, ShortID: c.Card.ShortID, Type: c.Card.Type,
-			Title: c.Card.Title, Summary: c.Card.Summary, Score: c.Score,
+			Title: c.Card.Title, Summary: c.Card.Summary, Score: c.Score, Tokens: c.Card.TokBody,
 		})
 	}
 	if len(out.Results) == 0 {
@@ -71,42 +72,95 @@ func (s *Server) searchContext(ctx context.Context, _ *mcp.CallToolRequest, in s
 
 // --- expand_card ---
 
+// maxExpandIDs bounds one batch so a single call cannot pull the whole store
+// into context.
+const maxExpandIDs = 10
+
 type expandIn struct {
-	ID string `json:"id" jsonschema:"card ID (e.g. rules/go-error-wrapping) or 4-hex short ID from a ▸ pointer"`
+	ID  string   `json:"id,omitempty" jsonschema:"one card ID (e.g. rules/go-error-wrapping) or 4-hex short ID from a ▸ pointer"`
+	IDs []string `json:"ids,omitempty" jsonschema:"several card IDs or short IDs to fetch in one call (max 10); prefer this over repeated calls"`
 }
 
-type expandOut struct {
+type expandedCard struct {
 	ID          string   `json:"id"`
 	Type        string   `json:"type"`
 	Title       string   `json:"title"`
 	Body        string   `json:"body"`
+	Tokens      int      `json:"tokens"`
 	Attachments []string `json:"attachments,omitempty"` // absolute paths, readable via the Read tool
 }
 
+type expandOut struct {
+	Cards    []expandedCard `json:"cards"`
+	NotFound []string       `json:"not_found,omitempty"`
+	Tokens   int            `json:"tokens"` // total estimated tokens returned
+}
+
+// expandCard fetches full bodies by ID. A batch reports unknown IDs in
+// NotFound instead of failing the whole call; only a call where nothing
+// resolves is an error.
 func (s *Server) expandCard(ctx context.Context, _ *mcp.CallToolRequest, in expandIn) (*mcp.CallToolResult, expandOut, error) {
-	c, err := s.store.CardByID(ctx, strings.TrimSpace(in.ID))
-	if err != nil {
-		return nil, expandOut{}, err
+	ids := expandIDs(in)
+	if len(ids) == 0 {
+		return nil, expandOut{}, fmt.Errorf("pass id or ids")
 	}
-	out := expandOut{ID: c.ID, Type: c.Type, Title: c.Title, Body: c.Body}
-	// Skill attachments live next to SKILL.md; hand back paths, not contents —
-	// Claude reads what it actually needs.
-	if dir := filepath.Dir(c.Path); strings.HasPrefix(c.Path, "skills/") {
-		abs := filepath.Join(config.KnowledgeDir(s.base), filepath.FromSlash(dir))
-		entries, err := os.ReadDir(abs)
-		if err == nil {
-			for _, e := range entries {
-				if e.IsDir() || e.Name() == "SKILL.md" {
-					continue
-				}
-				out.Attachments = append(out.Attachments, filepath.Join(abs, e.Name()))
-			}
+	if len(ids) > maxExpandIDs {
+		return nil, expandOut{}, fmt.Errorf("at most %d ids per call, got %d", maxExpandIDs, len(ids))
+	}
+	out := expandOut{Cards: make([]expandedCard, 0, len(ids))}
+	var lastErr error
+	for _, id := range ids {
+		c, err := s.store.CardByID(ctx, id)
+		if err != nil {
+			out.NotFound = append(out.NotFound, id)
+			lastErr = err
+			continue
+		}
+		card := expandedCard{ID: c.ID, Type: c.Type, Title: c.Title, Body: c.Body, Tokens: c.TokBody,
+			Attachments: s.skillAttachments(c.Path)}
+		out.Cards = append(out.Cards, card)
+		out.Tokens += c.TokBody
+		// An expansion is the strongest organic relevance signal (+3 weight).
+		// Best-effort: a stats hiccup must never fail a successful expand.
+		_ = s.store.AddFeedback(ctx, c.ID, store.FeedbackExpanded, 1)
+	}
+	if len(out.Cards) == 0 {
+		return nil, expandOut{}, lastErr
+	}
+	return nil, out, nil
+}
+
+// expandIDs merges id and ids, trimmed and de-duplicated in order.
+func expandIDs(in expandIn) []string {
+	raw := append([]string{in.ID}, in.IDs...)
+	out := make([]string, 0, len(raw))
+	for _, id := range raw {
+		if id = strings.TrimSpace(id); id != "" && !slices.Contains(out, id) {
+			out = append(out, id)
 		}
 	}
-	// An expansion is the strongest organic relevance signal (+3 weight).
-	// Best-effort: a stats hiccup must never fail a successful expand.
-	_ = s.store.AddFeedback(ctx, c.ID, store.FeedbackExpanded, 1)
-	return nil, out, nil
+	return out
+}
+
+// skillAttachments lists the files next to a skill's SKILL.md as absolute
+// paths — paths, not contents, so the agent reads only what it needs.
+func (s *Server) skillAttachments(cardPath string) []string {
+	if !strings.HasPrefix(cardPath, "skills/") {
+		return nil
+	}
+	abs := filepath.Join(config.KnowledgeDir(s.base), filepath.FromSlash(filepath.Dir(cardPath)))
+	entries, err := os.ReadDir(abs)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() || e.Name() == "SKILL.md" {
+			continue
+		}
+		out = append(out, filepath.Join(abs, e.Name()))
+	}
+	return out
 }
 
 // --- save_lesson ---

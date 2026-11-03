@@ -91,7 +91,7 @@ func TestSearchExpandSaveFlow(t *testing.T) {
 	// expand_card by short ID returns the body and bumps utility.
 	var exp expandOut
 	call(t, sess, "expand_card", map[string]any{"id": search.Results[0].ShortID}, &exp)
-	if !strings.Contains(exp.Body, "fmt.Errorf") {
+	if len(exp.Cards) != 1 || !strings.Contains(exp.Cards[0].Body, "fmt.Errorf") || exp.Tokens <= 0 {
 		t.Fatalf("expand body: %+v", exp)
 	}
 	s, err := store.Open(ctx, config.DBPath(base))
@@ -110,8 +110,18 @@ func TestSearchExpandSaveFlow(t *testing.T) {
 	// Skill expansion lists attachments as absolute paths.
 	var skill expandOut
 	call(t, sess, "expand_card", map[string]any{"id": "skills/deploy"}, &skill)
-	if len(skill.Attachments) != 1 || !strings.HasSuffix(skill.Attachments[0], "checklist.md") {
-		t.Fatalf("skill attachments: %+v", skill.Attachments)
+	if len(skill.Cards) != 1 || len(skill.Cards[0].Attachments) != 1 || !strings.HasSuffix(skill.Cards[0].Attachments[0], "checklist.md") {
+		t.Fatalf("skill attachments: %+v", skill)
+	}
+
+	// A batch returns every resolvable card and lists the unknown ones.
+	var batch expandOut
+	call(t, sess, "expand_card", map[string]any{"ids": []string{"rules/go-err", "skills/deploy", "rules/nope", "rules/go-err"}}, &batch)
+	if len(batch.Cards) != 2 || len(batch.NotFound) != 1 || batch.NotFound[0] != "rules/nope" {
+		t.Fatalf("batch expand: %+v", batch)
+	}
+	if search.Results[0].Tokens <= 0 {
+		t.Errorf("search hit should carry a token cost: %+v", search.Results[0])
 	}
 
 	// save_lesson writes a confirmed card and reindexes it immediately.
