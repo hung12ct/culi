@@ -27,7 +27,7 @@ import (
 type statusPayload struct {
 	Cards         int     `json:"cards"`
 	Version       string  `json:"version"`
-	SavedPct      string  `json:"savedPct"`
+	PerSession    string  `json:"perSession"` // avg tokens injected per session, 7d window
 	ToReview      int     `json:"toReview"`
 	ToLearn       int     `json:"toLearn"` // queued transcripts waiting to be mined
 	Addr          string  `json:"addr"`
@@ -38,10 +38,11 @@ type statusPayload struct {
 	ServeDown     bool    `json:"serveDown"`
 }
 
-type cfPayload struct {
+type deliveryPayload struct {
 	Injected string `json:"injected"`
 	Sessions string `json:"sessions"`
-	VsAll    string `json:"vsAll"`
+	Corpus   string `json:"corpus"` // live store size, humanized
+	Share    string `json:"share"`  // per-session injection as a share of the store
 }
 type tile struct {
 	Label string `json:"label"`
@@ -71,18 +72,18 @@ type staleItem struct {
 	Last  string `json:"last"`
 }
 type overviewPayload struct {
-	SavedPct    string      `json:"savedPct"`
-	Trend       []int       `json:"trend"`
-	CF          cfPayload   `json:"cf"`
-	Tiles       []tile      `json:"tiles"`
-	Granularity granPayload `json:"granularity"`
-	FailedJobs  []failedJob `json:"failedJobs"`
-	Noisy       []noisyItem `json:"noisy"`
-	NoisyHeader string      `json:"noisyHeader"`
-	NoisyMore   string      `json:"noisyMore"`
-	StaleHeader string      `json:"staleHeader"`
-	StaleMore   string      `json:"staleMore"`
-	Stale       []staleItem `json:"stale"`
+	PerSession  string          `json:"perSession"`
+	Trend       []int           `json:"trend"`
+	Delivery    deliveryPayload `json:"delivery"`
+	Tiles       []tile          `json:"tiles"`
+	Granularity granPayload     `json:"granularity"`
+	FailedJobs  []failedJob     `json:"failedJobs"`
+	Noisy       []noisyItem     `json:"noisy"`
+	NoisyHeader string          `json:"noisyHeader"`
+	NoisyMore   string          `json:"noisyMore"`
+	StaleHeader string          `json:"staleHeader"`
+	StaleMore   string          `json:"staleMore"`
+	Stale       []staleItem     `json:"stale"`
 }
 
 type supersedes struct {
@@ -264,11 +265,13 @@ type statsView struct {
 			Count       int    `json:"count"`
 			Tokens      int    `json:"tokens"`
 		} `json:"buckets"`
-		Counterfactual struct {
-			DumpTokens   int     `json:"dump_everything_tokens"`
+		Delivery struct {
 			Injected     int     `json:"injected_tokens"`
-			SavedPercent float64 `json:"saved_percent"`
-		} `json:"counterfactual"`
+			Sessions     int     `json:"sessions"`
+			PerSession   int     `json:"per_session_tokens"`
+			CorpusTokens int     `json:"corpus_tokens"`
+			CorpusShare  float64 `json:"corpus_share_percent"`
+		} `json:"delivery"`
 	} `json:"retrieval"`
 	Cards struct {
 		ByType        map[string]int `json:"by_type"`
@@ -323,7 +326,7 @@ func (s *server) buildStatus(ctx context.Context) statusPayload {
 	return statusPayload{
 		Cards:         len(metas),
 		Version:       s.version,
-		SavedPct:      fmtPct(sv.Retrieval.Counterfactual.DumpTokens, sv.Retrieval.Counterfactual.SavedPercent),
+		PerSession:    fmtPerSession(sv.Retrieval.Delivery.Sessions, sv.Retrieval.Delivery.PerSession),
 		ToReview:      toReview,
 		ToLearn:       sv.Learning.InboxPending,
 		Addr:          s.addr,
@@ -349,7 +352,7 @@ func (s *server) ollamaOffline(ctx context.Context) bool {
 func (s *server) buildOverview(ctx context.Context) overviewPayload {
 	sv := s.stats(ctx)
 	metas, _ := s.store.AllCardsMeta(ctx)
-	cf := sv.Retrieval.Counterfactual
+	d := sv.Retrieval.Delivery
 
 	// Map full card id → short id so the noisy/stale rows can deep-link into the KB.
 	idToShort := make(map[string]string, len(metas))
@@ -398,9 +401,12 @@ func (s *server) buildOverview(ctx context.Context) overviewPayload {
 	}
 
 	return overviewPayload{
-		SavedPct:    fmtPct(cf.DumpTokens, cf.SavedPercent),
-		Trend:       trend,
-		CF:          cfPayload{Injected: commas(cf.Injected), Sessions: itoa(sv.Retrieval.Sessions), VsAll: humanizeTokens(cf.DumpTokens)},
+		PerSession: fmtPerSession(d.Sessions, d.PerSession),
+		Trend:      trend,
+		Delivery: deliveryPayload{
+			Injected: commas(d.Injected), Sessions: itoa(sv.Retrieval.Sessions),
+			Corpus: humanizeTokens(d.CorpusTokens), Share: fmt.Sprintf("%.1f%%", d.CorpusShare),
+		},
 		Tiles:       tiles,
 		Granularity: granFromBuckets(sv),
 		FailedJobs:  failed,
@@ -875,11 +881,13 @@ func round(f float64) int {
 }
 func fmtUSD(f float64) string { return fmt.Sprintf("$%.2f", f) }
 
-func fmtPct(dumpTokens int, pct float64) string {
-	if dumpTokens <= 0 {
+// fmtPerSession renders the average per-session injection, or "—" before any
+// session has been recorded.
+func fmtPerSession(sessions, perSession int) string {
+	if sessions <= 0 {
 		return "—"
 	}
-	return fmt.Sprintf("%.0f%%", pct)
+	return humanizeTokens(perSession)
 }
 
 func commas(n int) string {
@@ -905,8 +913,10 @@ func humanizeTokens(n int) string {
 	switch {
 	case n >= 1_000_000:
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
-	case n >= 1_000:
+	case n >= 9_950:
 		return fmt.Sprintf("%.0fK", float64(n)/1_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", float64(n)/1_000)
 	default:
 		return itoa(n)
 	}

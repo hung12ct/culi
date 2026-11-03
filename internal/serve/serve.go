@@ -1,5 +1,5 @@
 // Package serve hosts the culi review console: a local, single-user web UI
-// over the knowledge store (candidate triage, KB browse, token-savings and
+// over the knowledge store (candidate triage, KB browse, context-delivery and
 // job-health dashboards). It is off every performance-critical path — the hook
 // and MCP surfaces never touch it — so it favors clarity over the hot-path
 // stdlib-only discipline the retrieval packages keep.
