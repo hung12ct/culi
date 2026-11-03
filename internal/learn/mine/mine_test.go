@@ -469,3 +469,44 @@ func TestHandAuthoredNeverRewritten(t *testing.T) {
 		t.Error("hand-authored file was rewritten (C4 violation)")
 	}
 }
+
+const statedRulePayload = `{
+  "lessons": [],
+  "missing_rules": [
+    {"slug": "make-verify", "title": "Run tests with make verify", "summary": "Never run plain go test.",
+     "markdown": "Run the suite with make verify, never plain go test.", "keywords": ["tests"], "scope": "global",
+     "confidence": 0.9, "evidence": "user: never plain go test", "supersedes": ""},
+    {"slug": "maybe", "title": "Maybe prefer short names", "summary": "Weakly implied.",
+     "markdown": "Prefer short names.", "keywords": ["naming"], "scope": "global",
+     "confidence": 0.65, "evidence": "user: hmm", "supersedes": ""}
+  ],
+  "style_observations": [],
+  "notes": ""
+}`
+
+// A rule the user stated outright confirms at once and rides the session
+// baseline even at the default confirm_at; a weakly implied one still waits.
+func TestStatedRuleConfirmsAsBaseline(t *testing.T) {
+	cheap := &fakeGen{payload: statedRulePayload}
+	m, done := newMiner(t, cheap, cheap)
+	defer done()
+	path := correctionTranscript(t, t.TempDir())
+
+	res, _, err := m.MineSession(context.Background(), queue.Job{SessionID: "s1", TranscriptPath: path}, queue.Cursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Confirmed) != 1 || len(res.Created) != 1 {
+		t.Fatalf("confirmed=%v created=%v, want 1 confirmed / 1 candidate", res.Confirmed, res.Created)
+	}
+	kdir := config.KnowledgeDir(m.Base)
+	for id, want := range map[string]string{res.Confirmed[0]: "confirmed", res.Created[0]: "candidate"} {
+		card, err := knowledge.ReadCard(kdir, id+".md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if card.Status != want || !card.Baseline {
+			t.Errorf("%s: status %q baseline %v, want %s baseline", id, card.Status, card.Baseline, want)
+		}
+	}
+}

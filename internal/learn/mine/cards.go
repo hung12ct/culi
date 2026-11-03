@@ -23,6 +23,17 @@ const defaultConfirmAt = 2
 
 // confirmThreshold is the effective observation count for confirmation: the
 // configured Miner.ConfirmAt, or the default when unset/invalid.
+// ruleConfirmConfidence is the confidence at which a rule the user stated
+// outright skips the observation threshold.
+const ruleConfirmConfidence = 0.8
+
+// statedRule reports whether a mined rule is an explicit, quoted standing
+// instruction. That is user intent, like save_lesson, so it confirms at once;
+// lessons inferred from corrections keep waiting for confirm_at observations.
+func statedRule(typ string, c cardOut) bool {
+	return typ == "rule" && c.Confidence >= ruleConfirmConfidence && strings.TrimSpace(c.Evidence) != ""
+}
+
 func (m *Miner) confirmThreshold() int {
 	if m.ConfirmAt >= 1 {
 		return m.ConfirmAt
@@ -65,18 +76,22 @@ func (m *Miner) writeCandidate(ctx context.Context, typ string, c cardOut, repo 
 	if ev := strings.TrimSpace(c.Evidence); ev != "" {
 		body += "\n\n**Evidence:** " + firstLine(ev)
 	}
-	confirmed = m.confirmThreshold() <= 1 // one observation already meets it
+	confirmed = m.confirmThreshold() <= 1 || statedRule(typ, c) // one observation already meets it
 	status := "candidate"
 	if confirmed {
 		status = "confirmed"
 	}
 	card := knowledge.Card{
-		Type:         typ,
-		Title:        strings.TrimSpace(c.Title),
-		Summary:      strings.TrimSpace(c.Summary),
-		Body:         body,
-		Scopes:       []string{scope},
-		Triggers:     knowledge.Triggers{Keywords: kw},
+		Type:     typ,
+		Title:    strings.TrimSpace(c.Title),
+		Summary:  strings.TrimSpace(c.Summary),
+		Body:     body,
+		Scopes:   []string{scope},
+		Triggers: knowledge.Triggers{Keywords: kw},
+		// A standing rule applies to every task in its scope, not only to
+		// prompts that happen to share its words: it rides the session-start
+		// baseline, like the CLAUDE.md line it replaces.
+		Baseline:     typ == "rule",
 		Status:       status,
 		Observations: 1,
 		Supersedes:   m.validSupersedes(ctx, c.Supersedes),
