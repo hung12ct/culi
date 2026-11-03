@@ -21,6 +21,7 @@ Usage:
   culi mcp                      MCP stdio server (spawned by Claude Code; internal)
   culi index [--full]           sync knowledge/ into the index + embed changed cards
   culi query [--timing] <text>  debug retrieval from the terminal
+  culi eval --suite FILE        score retrieval on labeled prompts (hit rate, MRR, abstain)
   culi card list|show|rm <id>   inspect the card store
   culi card dupes [--retire]    find (and retire) cards that duplicate each other
   culi down <id>                downvote a card (ranks lower, never removed)
@@ -55,6 +56,8 @@ func main() {
 		exit(cli.Index(os.Args[2:]))
 	case "query":
 		exit(cli.Query(os.Args[2:]))
+	case "eval":
+		exit(cli.Eval(os.Args[2:]))
 	case "card":
 		exit(cli.Card(os.Args[2:]))
 	case "import":

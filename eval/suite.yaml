@@ -1,0 +1,125 @@
+# Retrieval suite for the fixture store in eval/fixture/knowledge.
+#
+# Each case is a prompt a developer might type, phrased in their words rather
+# than the card's, and the cards that should reach the agent. A case passes
+# ("hit") when at least one expected card is injected. Cases with an empty
+# expect list are abstain cases: the right answer is to inject nothing.
+#
+# The suite is hand-written by the maintainer and small; treat its numbers as
+# a regression baseline for retrieval changes, not a general accuracy claim.
+name: fixture
+cases:
+  - id: stalled-upstream
+    prompt: the payments client hangs forever when the upstream stalls, how do I stop that
+    expect: [rules/http-client-timeouts]
+  - id: webhook-503
+    prompt: our webhook sender should try again when the partner API returns 503
+    expect: [rules/retry-backoff-jitter]
+  - id: sqlite-locked
+    prompt: getting "database is locked" when two workers write to the same sqlite file
+    expect: [lessons/sqlite-busy-timeout]
+  - id: jsonl-token-too-long
+    prompt: reading a big jsonl log crashes with token too long
+    expect: [lessons/bufio-scanner-long-lines]
+  - id: prod-index
+    prompt: add an index on the orders table in prod without blocking writes
+    expect: [lessons/postgres-create-index-concurrently]
+  - id: unit-tests
+    prompt: write unit tests for the price calculator covering the edge cases
+    expect: [rules/go-table-tests, rules/no-testify]
+  - id: storage-errors
+    prompt: how should errors returned from the storage layer be formatted
+    expect: [rules/go-error-wrapping]
+  - id: query-signature
+    prompt: this function runs a database query, what should its signature look like
+    expect: [rules/go-context-first]
+  - id: mutex-latency
+    prompt: we hold the cache mutex while calling the remote API and latency spikes
+    expect: [rules/go-release-locks-before-io]
+  - id: commit
+    prompt: commit these changes for me
+    expect: [rules/conventional-commits, rules/stage-specific-files, styles/short-commit-bodies]
+  - id: search-handler
+    prompt: search users by the name from the query string in the HTTP handler
+    expect: [rules/sql-parameterized]
+  - id: add-column
+    prompt: add a nullable column to the accounts table
+    expect: [rules/migrations-reversible]
+  - id: stripe-key
+    prompt: where should I put the stripe api key for the new billing service
+    expect: [rules/secrets-env]
+  - id: println-debugging
+    prompt: replace the fmt.Println debugging with proper logs
+    expect: [rules/log-structured]
+  - id: big-image
+    prompt: the docker image is 1.2GB, make it smaller
+    expect: [rules/docker-multistage]
+  - id: double-render
+    prompt: the component renders twice because I copy props into state in an effect
+    expect: [rules/react-derive-state]
+  - id: hardcoded-color
+    prompt: the button color is hard-coded #3b82f6, make it work with the dark theme
+    expect: [rules/css-design-tokens]
+  - id: orders-paging
+    prompt: the /orders list endpoint returns every row at once, add paging
+    expect: [rules/api-cursor-pagination]
+  - id: cut-release
+    prompt: cut the v1.4.0 release
+    expect: [rules/changelog-on-release]
+  - id: poller-goroutines
+    prompt: memory keeps growing in the poller service and pprof shows thousands of goroutines blocked on ticker channels
+    expect: [lessons/stop-tickers]
+  - id: sse-burst
+    prompt: events arrive all at once at the end instead of streaming through nginx
+    expect: [lessons/sse-flush]
+  - id: missing-false
+    prompt: the enabled=false field disappears from the JSON response
+    expect: [lessons/json-omitempty-zero]
+  - id: nil-map-panic
+    prompt: "panic: assignment to entry in nil map in the session cache"
+    expect: [lessons/nil-map-write]
+  - id: push-after-rebase
+    prompt: I rebased my branch, how do I update the remote safely
+    expect: [lessons/force-with-lease]
+  - id: ci-versions
+    prompt: CI installs different package versions than my laptop does
+    expect: [lessons/npm-ci-lockfile]
+  - id: nine-params
+    prompt: NewServer takes nine parameters and most of them are optional
+    expect: [patterns/functional-options]
+  - id: big-mock
+    prompt: mocking this huge Storage interface in tests is painful
+    expect: [patterns/consumer-interfaces]
+  - id: parallel-fetch
+    prompt: fetch 200 product pages in parallel but never more than 10 at a time
+    expect: [patterns/errgroup-bounded-fanout]
+  - id: lost-kafka
+    prompt: after saving the order we publish to kafka, but sometimes the message is lost
+    expect: [patterns/transactional-outbox]
+  - id: double-charge
+    prompt: clients retry POST /payments after a timeout and we charge them twice
+    expect: [patterns/idempotency-keys]
+  - id: flag-at-100
+    prompt: the new checkout flow is at 100% of users, what is left to clean up
+    expect: [patterns/feature-flag-cleanup]
+  - id: useless-comment
+    prompt: is a comment like "increment i" above i++ worth keeping
+    expect: [styles/comments-explain-why]
+  - id: abstain-haiku
+    prompt: write a haiku about the ocean at night
+    expect: []
+  - id: abstain-capital
+    prompt: what is the capital of Australia
+    expect: []
+  - id: abstain-thanks
+    prompt: thanks, looks good
+    expect: []
+  - id: abstain-translate
+    prompt: translate good morning into Japanese
+    expect: []
+  - id: abstain-hamlet
+    prompt: summarize the plot of Hamlet in two sentences
+    expect: []
+  - id: abstain-ok
+    prompt: ok
+    expect: []

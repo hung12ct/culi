@@ -61,6 +61,15 @@ test-cover: ## run tests and open HTML coverage report
 bench: ## run all benchmarks (retrieval hot path)
 	go test ./... -run='^$$' -bench=. -benchmem
 
+# Indexes the fixture store into a throwaway CULI_HOME, so ~/.culi is never
+# touched. Uses Ollama embeddings when it is running; EVAL_FLAGS=--keyword-only
+# forces the keyword arm alone.
+eval: ## score retrieval on the bundled fixture suite (sandboxed)
+	@tmp=$$(mktemp -d) && cp -R eval/fixture/knowledge "$$tmp/" && \
+	CULI_HOME="$$tmp" go run ./cmd/culi index --full >/dev/null && \
+	CULI_HOME="$$tmp" go run ./cmd/culi eval --suite eval/suite.yaml $(EVAL_FLAGS); \
+	rc=$$?; rm -rf "$$tmp"; exit $$rc
+
 # ── gate ──────────────────────────────────────────────────────────────────────
 
 check: fmt vet lint build test ## pre-commit gate: fmt + vet + lint + build + test
