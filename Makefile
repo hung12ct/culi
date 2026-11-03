@@ -1,4 +1,4 @@
-.PHONY: help build install fmt vet lint tidy test test-race test-cover bench check clean
+.PHONY: help build install dist fmt vet lint tidy test test-race test-cover bench eval check clean
 
 # ── colours ──────────────────────────────────────────────────────────────────
 GREEN  := \033[0;32m
@@ -27,6 +27,9 @@ build: ## compile all packages
 
 install: ## install the version-stamped culi binary to GOBIN
 	go install -ldflags "$(LDFLAGS)" ./cmd/culi
+
+dist: ## build release archives + checksums.txt for every platform into dist/
+	sh scripts/dist.sh $(VERSION)
 
 # ── code quality ──────────────────────────────────────────────────────────────
 

@@ -29,6 +29,7 @@ go.work.sum
 
 # Build output
 bin/
+dist/
 
 # Local dev (mirrors cutpilot/phin conventions)
 .DS_Store
