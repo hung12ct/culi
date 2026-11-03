@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hung12ct/culi/internal/harness"
 	"github.com/hung12ct/culi/internal/learn/codexscan"
 )
 
@@ -80,7 +81,7 @@ func TestCodexDoctorHelpers(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte(log), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := lastCodexHook(logPath); !strings.Contains(got, "hook stop queued session=codex:y") {
+	if got := lastHook(logPath, harness.Codex); !strings.Contains(got, "hook stop queued session=codex:y") {
 		t.Fatalf("last=%q", got)
 	}
 

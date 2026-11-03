@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,8 +160,36 @@ ollama:
 			registerMCPCodex()
 		}
 	}
-	fmt.Println("\nSeed cards into", kdir, "then run `culi index`.")
+	printNextSteps(os.Stdout, base)
 	return nil
+}
+
+// printNextSteps ends `culi init` with what to do now. An empty store gets the
+// import path first: without cards, culi has nothing to inject.
+func printNextSteps(w io.Writer, base string) {
+	cfg, _ := config.Load(base)
+	fmt.Fprintf(w, "ollama:   %s\n", ollamaStatus(cfg.Ollama.Endpoint, cfg.Ollama.Model))
+	live := 0
+	if s, err := store.Open(context.Background(), config.DBPath(base)); err == nil {
+		if metas, err := s.AllCardsMeta(context.Background()); err == nil {
+			for _, m := range metas {
+				if m.Status != "candidate" && m.Status != "retired" {
+					live++
+				}
+			}
+		}
+		s.Close()
+	}
+	fmt.Fprintln(w, "\nNext:")
+	if live == 0 {
+		fmt.Fprintln(w, "  1. culi import scan ~/code/repo-a ~/code/repo-b   find CLAUDE.md, AGENTS.md, skills and agents in your repos")
+		fmt.Fprintln(w, "  2. culi import merge && culi import apply         turn them into cards (merge uses your Claude/Codex login)")
+		fmt.Fprintln(w, "  3. Open a new Claude Code or Codex session; matching cards arrive with your next prompt")
+	} else {
+		fmt.Fprintf(w, "  1. Open a new Claude Code or Codex session; %d cards are ready\n", live)
+	}
+	fmt.Fprintln(w, "  culi learns lessons from finished sessions in the background; see them with: culi serve")
+	fmt.Fprintln(w, "  Check the wiring any time: culi doctor    Remove culi cleanly: culi uninstall")
 }
 
 // selectHarnesses maps the --harness flag to the harnesses to configure. The

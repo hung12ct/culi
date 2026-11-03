@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -22,19 +21,31 @@ import (
 // than presenting "configured" as "trusted".
 func Doctor(args []string) error {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	harnessFlag := fs.String("harness", harness.Codex.String(), "harness to inspect: codex")
+	harnessFlag := fs.String("harness", "auto", "what to inspect: auto (everything installed) | claude | codex")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("cli: %w", err)
 	}
-	if *harnessFlag != harness.Codex.String() {
-		return fmt.Errorf("cli: doctor currently supports --harness=codex")
+	switch *harnessFlag {
+	case "auto", "":
+		return doctorAll(os.Stdout)
+	case harness.Claude.String():
+		base, err := config.BaseDir()
+		if err != nil {
+			return err
+		}
+		home, _ := os.UserHomeDir()
+		doctorClaude(os.Stdout, home, base)
+		return nil
+	case harness.Codex.String():
+		return doctorCodex(os.Stdout)
 	}
-	return doctorCodex(os.Stdout)
+	return fmt.Errorf("cli: --harness must be auto, claude or codex")
 }
 
 func doctorCodex(w io.Writer) error {
 	home := codexHome()
 	configured, timeoutOK := codexHookStatus(filepath.Join(home, "hooks.json"))
+	fmt.Fprintln(w, "Codex")
 	fmt.Fprintf(w, "Codex home  %s\n", home)
 	if configured == 4 {
 		fmt.Fprintln(w, "Hooks       4/4 configured (trust: verify with Codex `/hooks`)")
@@ -57,7 +68,7 @@ func doctorCodex(w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if line := lastCodexHook(filepath.Join(config.LogDir(base), "hook.log")); line != "" {
+	if line := lastHook(filepath.Join(config.LogDir(base), "hook.log"), harness.Codex); line != "" {
 		fmt.Fprintf(w, "Last hook   %s\n", line)
 	} else {
 		fmt.Fprintln(w, "Last hook   none observed; start a new Codex session and submit a prompt")
@@ -188,22 +199,4 @@ func codexMCPConfigured(path string) bool {
 		}
 	}
 	return false
-}
-
-func lastCodexHook(path string) string {
-	f, err := os.Open(path)
-	if err != nil {
-		return ""
-	}
-	defer f.Close()
-	last := ""
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 64<<10), 1<<20)
-	for sc.Scan() {
-		line := sc.Text()
-		if strings.Contains(line, "session="+harness.Codex.String()+":") {
-			last = line
-		}
-	}
-	return last
 }
