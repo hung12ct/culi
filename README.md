@@ -1,8 +1,8 @@
 <div align="center">
   <img src="docs/logo.png" alt="culi" width="120" height="120" />
   <h1>culi ☕</h1>
-  <p><b>Local context control for Claude Code and OpenAI Codex.</b></p>
-  <p>One trusted knowledge store. Only the relevant cards reach each prompt. Useful lessons come back for review.</p>
+  <p><b>Memory for Claude Code and Codex in one Go binary.</b></p>
+  <p>No model calls while you work. No Node, Python, daemon or account. Your memory stays as plain Markdown in git.</p>
 </div>
 
 [![Release](https://img.shields.io/github/v/release/hung12ct/culi?display_name=tag&sort=semver)](https://github.com/hung12ct/culi/releases/latest)
@@ -16,7 +16,19 @@ definitions as small Markdown cards, then routes a token-budgeted selection to C
 
 It is local-first, git-backed, and inspectable. Hooks and retrieval make no model calls; optional
 background learning proposes new knowledge for review. No Node, Python, or resident daemon is
-required.
+required. Built on [gopheragent](https://github.com/hung12ct/gopheragent).
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hung12ct/culi/main/install.sh | sh
+```
+
+That one command installs the binary and wires culi into Claude Code and Codex. `culi doctor`
+checks everything; `culi uninstall` removes it cleanly.
+
+Measured on an M1 Pro with a 667-card store: the prompt hook takes **~20 ms** (p50, keyword
+search) or **~63 ms** (with local semantic search) and injects **~300 tokens** (median) per prompt.
+See the [method](docs/comparison.md#method). Retrieval quality is measured with `culi eval`
+([results and known misses](docs/evaluation.md)).
 
 ## What you get
 
@@ -41,13 +53,27 @@ required.
 | Useful corrections disappear in old transcripts | Lessons are mined, deduplicated, and placed in a review queue |
 | Context delivery is invisible | Activity and Knowledge Pulse show what was delivered, where, and to which harness |
 
+### culi or claude-mem?
+
+[claude-mem](https://github.com/thedotmack/claude-mem) records sessions automatically and
+compresses them with a model. culi keeps a curated store of cards and injects only what fits each
+prompt. culi needs no runtime, registers 3 Claude Code hooks instead of 9, and makes no model calls
+while you work. claude-mem captures more with less effort and supports more agents. The
+[full comparison](docs/comparison.md) links every claim to its source.
+
 ## Quick start
 
 ```bash
-go install github.com/hung12ct/culi/cmd/culi@latest
-culi init                       # auto-detect Claude Code and Codex
+curl -fsSL https://raw.githubusercontent.com/hung12ct/culi/main/install.sh | sh   # install + culi init
+culi doctor                     # store, Ollama, learning backend, hooks and MCP, with fixes
 culi serve                      # http://localhost:7378
 ```
+
+The script installs a prebuilt binary to `~/.local/bin` after checking its SHA-256, then runs
+`culi init`, which registers hooks and MCP for the Claude Code and Codex installs it finds and
+prints the next step (importing your existing CLAUDE.md and skills when the store is empty). On Windows,
+download `culi_windows_amd64.zip` from [Releases](https://github.com/hung12ct/culi/releases). With
+Go 1.25+ you can also run `go install github.com/hung12ct/culi/cmd/culi@latest`.
 
 Open a new coding-agent session after initialization. Codex users should run `/hooks` once and
 trust the four generated Culi hooks. Verify the wiring with:
@@ -68,7 +94,7 @@ The local console makes Culi's behavior visible and reversible: review proposed 
 edit cards, filter delivery activity by agent/repository/date, compare hot cards across Claude and
 Codex, and safely tune the learning backend.
 
-| Home — health, next actions, and savings | Review — evidence-first lesson decisions |
+| Home — health, next actions, and context delivered | Review — evidence-first lesson decisions |
 |---|---|
 | ![Culi overview](docs/overview.png) | ![Culi review queue](docs/review.png) |
 
@@ -119,6 +145,8 @@ and manual learning commands.
 - [Knowledge and imports](docs/knowledge.md) — card format, scopes, import/merge/apply, export, and git generation.
 - [Learning and cost](docs/learning.md) — providers, auth, Codex recovery, caps, and troubleshooting.
 - [Configuration](docs/configuration.md) — complete `config.yaml` reference and safe console settings.
+- [Retrieval evaluation](docs/evaluation.md) — `culi eval`, the bundled suite, results and known misses.
+- [culi and claude-mem](docs/comparison.md) — a sourced comparison and the benchmark method.
 - [Product vision](docs/VISION.md) — principles and future direction.
 
 ## Common commands
@@ -127,11 +155,14 @@ and manual learning commands.
 |---|---|
 | `culi init [--harness=auto\|claude\|codex\|all]` | Create the store and register selected hooks + MCP |
 | `culi serve` | Start the local control console |
-| `culi doctor --harness=codex` | Check Codex hooks, MCP, scanner health, and learning backlog |
+| `culi doctor` | Check the store, Ollama, learning backend, failed jobs, and Claude Code/Codex wiring |
+| `culi uninstall [--purge]` | Remove culi's hooks, statusline and MCP entries; `--purge` also deletes `~/.culi` |
 | `culi query <text>` | Inspect retrieval from the terminal |
-| `culi stats` | Show context savings, gate behavior, and learning spend |
+| `culi eval --suite <file>` | Score retrieval on labeled prompts (hit rate, MRR, abstain accuracy) |
+| `culi stats` | Show context delivered, gate behavior, and learning spend |
 | `culi learn` | Mine queued transcripts once |
 | `culi learn --scan-codex --dry-run` | Preview discoverable Codex history without writing |
+| `culi learn --failed` | List failed learning jobs with their recorded reason |
 | `culi import scan\|merge\|apply` | Reconcile existing agent instructions into cards |
 | `culi gen --repo X --target=claude\|codex\|both` | Generate repo instructions and cards from git history |
 | `culi review` | Approve or reject proposed cards in the terminal |
@@ -142,6 +173,8 @@ Run `culi help` for the complete command list.
 
 - Hook failures fail open: empty output, exit 0, never block the agent.
 - Prompt-path retrieval has no LLM calls and enforces its token cap twice.
+- Before any transcript reaches a learning backend, `<private>…</private>` blocks are removed and
+  credential-shaped strings (API keys, tokens, private keys) are masked.
 - API spend and all-provider call counts have daily hard limits.
 - Culi's own terminal-model calls are marked internal to prevent self-learning loops.
 - Knowledge files are canonical; runtime SQLite state is migrated or rebuildable as appropriate.
@@ -149,7 +182,7 @@ Run `culi help` for the complete command list.
 
 ## Requirements
 
-- Go 1.25+ for `go install` (the Go toolchain can download the pinned version automatically).
+- Nothing to run a release binary. Go 1.25+ only to build from source.
 - Claude Code with lifecycle hooks and MCP, and/or Codex CLI 0.145+.
 - Ollama with `nomic-embed-text` is optional.
 

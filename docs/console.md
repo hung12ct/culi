@@ -17,14 +17,14 @@ Home answers two questions first: “Is Culi working?” and “What needs my at
 
 - total cards and proposed lessons awaiting review;
 - queued transcript-learning work and failed jobs;
-- actual context delivered versus the estimated always-load-everything baseline;
+- context delivered per session, and what share of the knowledge store that is;
 - recent gate skips, learning spend, injection granularity, noisy cards, and stale cards;
 - a seven-day Knowledge Pulse summary with shortcuts into the detailed analytics view.
 
 ![Home and system health](overview.png)
 
-Savings remain an estimate, not a billing claim. Culi compares observed injected tokens with the
-counterfactual cost of loading the current knowledge corpus into every recorded session.
+Token figures are chars/4 estimates of what Culi actually injected, not a billing claim. Culi does
+not report "tokens saved": it cannot know what you would have loaded without it.
 
 ## Review
 

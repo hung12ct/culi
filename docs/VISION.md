@@ -23,7 +23,7 @@ inspectable and reversible.
 
 ### Now — trustworthy daily control
 
-- Health, real review counts, savings, and next actions on Home.
+- Health, real review counts, context delivered, and next actions on Home.
 - Fast evidence-first review of proposed lessons with keyboard navigation and undo.
 - Searchable knowledge maintenance plus Knowledge Pulse delivery analytics by card, harness, and repository.
 - Per-session activity filters for Claude/Codex, repository, and date range.
