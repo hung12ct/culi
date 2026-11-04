@@ -120,10 +120,10 @@ prompt. culi needs no runtime, registers 3 Claude Code hooks instead of 9, and m
 while you work. claude-mem captures more with less effort and supports more agents.
 
 In a [side-by-side benchmark](docs/comparison.md#memory-benchmark) (conventions taught in one
-session, checked in the next four), culi applied every convention in every completed session and
-claude-mem applied 9 of 11, at about 10% versus 40% above the no-memory session cost. It is a small
-benchmark, one fixture and at most two runs per arm; the page states its limits and links every
-claim to its source.
+session, checked in the next four, two fixtures), culi v0.8.1 applied 61 of 61 checked conventions
+and claude-mem 41 of 53, with sessions costing about 6% versus 40% more than without memory. It is
+a small benchmark, at most four runs per arm; the page states its limits and links every claim to
+its source.
 
 Tested against claude-mem 15.9.0. If something here is wrong or out of date,
 [open an issue](https://github.com/hung12ct/culi/issues) and the comparison will be corrected.
