@@ -44,7 +44,7 @@ Code's built-in auto-memory disabled, except the arm that measures that feature 
 | Arm (2026-11-04) | Conventions applied in sessions 2–5 | Avg. session cost | Tool's own model calls (5 sessions) |
 |---|---|---|---|
 | No memory | 2/11, 3/11 | $0.063 | 0 |
-| Claude Code auto-memory only | 5/11, 4/11 | — | — |
+| Claude Code auto-memory only | 5/11, 4/11 | $0.067 | built in |
 | claude-mem 15.9.0 | 9/11 (one valid run) | $0.090 | 29 observer turns, ~338k context tokens |
 | culi v0.8.0 | 3/11 | $0.064 | 2 |
 | culi with this change | 8/8 (session 5 lost to a quota error), 11/11 | $0.070 | 1–2 |
