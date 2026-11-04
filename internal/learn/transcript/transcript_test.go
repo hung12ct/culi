@@ -142,7 +142,8 @@ func TestExtractCorrectionAndRejection(t *testing.T) {
 }
 
 func TestExtractRepeatedInstruction(t *testing.T) {
-	instr := "always run gofmt and golangci lint before committing changes"
+	// No standing phrase ("always", "never"…), so only the repeat can trigger.
+	instr := "run gofmt and golangci lint before committing changes"
 	entries := []Entry{
 		{Role: "user", Text: instr},
 		{Role: "assistant", Text: "ok"},
@@ -267,5 +268,36 @@ func TestHookInjectionIsNotAUserTurn(t *testing.T) {
 	}
 	if !sawAssistant {
 		t.Error("assistant turn missing — fixture no longer exercises the property")
+	}
+}
+
+func TestExtractStandingInstruction(t *testing.T) {
+	for _, text := range []string{
+		"Add a Remove method. Conventions for this repo: run tests only with make verify.",
+		"from now on wrap every error with inverr.Wrap",
+		"never use float for money here",
+		"Từ giờ luôn luôn chạy make verify trước khi commit",
+		"nhớ là tiền phải lưu bằng int64 cents",
+	} {
+		wins := Extract([]Entry{{Role: "user", Text: text}, {Role: "assistant", Text: "ok"}})
+		if len(wins) != 1 || wins[0].Reason != "instruction" {
+			t.Errorf("%q: windows = %+v, want one instruction window", text, wins)
+		}
+	}
+}
+
+func TestExtractStandingInstructionFalsePositives(t *testing.T) {
+	for _, text := range []string{
+		"làm luôn đi",               // "do it right away", not "always"
+		"never mind, ship it",       // fixed expression
+		"add a retry helper please", // ordinary task
+	} {
+		if wins := Extract([]Entry{{Role: "user", Text: text}}); len(wins) != 0 {
+			t.Errorf("%q produced windows: %+v", text, wins)
+		}
+	}
+	// Assistant prose that says "always" is not a user instruction.
+	if wins := Extract([]Entry{{Role: "assistant", Text: "I always run the tests first"}}); len(wins) != 0 {
+		t.Errorf("assistant text produced windows: %+v", wins)
 	}
 }
