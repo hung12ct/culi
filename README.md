@@ -53,19 +53,6 @@ See the [method](docs/comparison.md#method). Retrieval quality is measured with 
 | Conventions you stated and corrections you made disappear in old transcripts | Stated conventions become rules at once; lessons from corrections are mined into a review queue |
 | Context delivery is invisible | Activity and Knowledge Pulse show what was delivered, where, and to which harness |
 
-### culi or claude-mem?
-
-[claude-mem](https://github.com/thedotmack/claude-mem) records sessions automatically and
-compresses them with a model. culi keeps a curated store of cards and injects only what fits each
-prompt. culi needs no runtime, registers 3 Claude Code hooks instead of 9, and makes no model calls
-while you work. claude-mem captures more with less effort and supports more agents.
-
-In a [side-by-side benchmark](docs/comparison.md#memory-benchmark) (conventions taught in one
-session, checked in the next four), culi applied every convention in every completed session and
-claude-mem applied 9 of 11, at about 10% versus 40% above the no-memory session cost. It is a small
-benchmark, one fixture and at most two runs per arm; the page states its limits and links every
-claim to its source.
-
 ## Quick start
 
 ```bash
@@ -124,6 +111,22 @@ session transcript ──► background mining ──► review ──► knowle
   daily call/spend caps.
 - **Govern:** imports and generated knowledge are staged or git-backed; retiring a card is
   reversible and hand-authored files are not silently rewritten.
+
+## How culi compares
+
+[claude-mem](https://github.com/thedotmack/claude-mem) records sessions automatically and
+compresses them with a model. culi keeps a curated store of cards and injects only what fits each
+prompt. culi needs no runtime, registers 3 Claude Code hooks instead of 9, and makes no model calls
+while you work. claude-mem captures more with less effort and supports more agents.
+
+In a [side-by-side benchmark](docs/comparison.md#memory-benchmark) (conventions taught in one
+session, checked in the next four), culi applied every convention in every completed session and
+claude-mem applied 9 of 11, at about 10% versus 40% above the no-memory session cost. It is a small
+benchmark, one fixture and at most two runs per arm; the page states its limits and links every
+claim to its source.
+
+Tested against claude-mem 15.9.0. If something here is wrong or out of date,
+[open an issue](https://github.com/hung12ct/culi/issues) and the comparison will be corrected.
 
 ## Learning backends
 
