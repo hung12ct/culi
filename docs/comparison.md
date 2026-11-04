@@ -4,9 +4,9 @@ claude-mem is the most popular memory layer for Claude Code. The two tools solve
 problems with different designs. This page compares them on facts you can check, and says where
 claude-mem is the better choice.
 
-Everything about claude-mem below comes from its own package and README at
-[v15.9.0](https://github.com/thedotmack/claude-mem/tree/v15.9.0), current as of 2026-11-03. We did
-not install or benchmark claude-mem, so this page makes no latency claims about it.
+Facts about claude-mem come from its own package and README at
+[v15.9.0](https://github.com/thedotmack/claude-mem/tree/v15.9.0), current as of 2026-11-03. The
+[benchmark](#memory-benchmark) below installed both tools side by side in isolated homes.
 
 ## Design in one sentence each
 
@@ -30,6 +30,36 @@ not install or benchmark claude-mem, so this page makes no latency claims about 
 | Where memory lives | Markdown files in a git repo (`~/.culi/knowledge/`) that you can read, diff and edit | SQLite plus a Chroma vector database ([README L271](https://github.com/thedotmack/claude-mem/blob/v15.9.0/README.md?plain=1#L271)), with optional Cloud Sync to cmem.ai |
 | Account or sign-in | Never | Installer offers a sign-in for its hosted observer. You can skip it with `--provider` or `CLAUDE_MEM_ONLINE_OPTIN=false` ([README L149–151](https://github.com/thedotmack/claude-mem/blob/v15.9.0/README.md?plain=1#L149-L151)) |
 | What gets remembered | Only cards you wrote or approved | Everything captured, automatically |
+
+## Memory benchmark
+
+Does knowledge from one session reach the next ones? A small Go repo has four conventions that
+cannot be inferred from its code: run tests only with `make verify`, wrap errors with
+`inverr.Wrap`, store money as `int64` cents, start new files with an SPDX header. Session 1 asks
+for a change and states the conventions. Sessions 2–5 ask for unrelated changes and never mention
+them; each applicable convention is checked automatically from the session's commands and diff
+(11 checks per run). Every arm runs in its own `HOME` with `claude -p`, Sonnet 5.5, and Claude
+Code's built-in auto-memory disabled, except the arm that measures that feature alone.
+
+| Arm (2026-11-04) | Conventions applied in sessions 2–5 | Avg. session cost | Tool's own model calls (5 sessions) |
+|---|---|---|---|
+| No memory | 2/11, 3/11 | $0.063 | 0 |
+| Claude Code auto-memory only | 5/11, 4/11 | — | — |
+| claude-mem 15.9.0 | 9/11 (one valid run) | $0.090 | 29 observer turns, ~338k context tokens |
+| culi v0.8.0 | 3/11 | $0.064 | 2 |
+| culi with this change | 8/8 (session 5 lost to a quota error), 11/11 | $0.070 | 1–2 |
+
+| Measured on the same machine | culi | claude-mem 15.9.0 |
+|---|---|---|
+| Install | 3–6 s, 16 MB | 83 s, 1.8 GB (1.2 GB without the npm cache) |
+| `UserPromptSubmit` hook, p50 / p95 | 44 / 50 ms | 218 / 419 ms |
+| Hook before every `Read`/`Bash`/`Grep`/`Glob` | none | 194 / 199 ms |
+
+Read the numbers with their limits: one fixture, two runs per arm at most, and an agent that
+varies run to run. claude-mem's second run is excluded because its observer paused itself at 96%
+of the weekly Claude quota (a deliberate guard, not a failure), so it has one valid run. Its
+observer also reads credentials only from the Claude Code credential store, so the sandbox needed
+a `.credentials.json` holding the same token the session used.
 
 ## Where claude-mem is the better choice
 
