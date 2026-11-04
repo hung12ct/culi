@@ -50,7 +50,7 @@ See the [method](docs/comparison.md#method). Retrieval quality is measured with 
 | Guidance is copied across `CLAUDE.md`, `AGENTS.md`, agents, and skills | One canonical, git-versioned card store |
 | Every session loads large instruction files | Only prompt-relevant cards are packed under a hard budget |
 | Claude and Codex learn separately | Both agents contribute to and retrieve from the same knowledge |
-| Useful corrections disappear in old transcripts | Lessons are mined, deduplicated, and placed in a review queue |
+| Conventions you stated and corrections you made disappear in old transcripts | Stated conventions become rules at once; lessons from corrections are mined into a review queue |
 | Context delivery is invisible | Activity and Knowledge Pulse show what was delivered, where, and to which harness |
 
 ### culi or claude-mem?
@@ -58,8 +58,13 @@ See the [method](docs/comparison.md#method). Retrieval quality is measured with 
 [claude-mem](https://github.com/thedotmack/claude-mem) records sessions automatically and
 compresses them with a model. culi keeps a curated store of cards and injects only what fits each
 prompt. culi needs no runtime, registers 3 Claude Code hooks instead of 9, and makes no model calls
-while you work. claude-mem captures more with less effort and supports more agents. The
-[full comparison](docs/comparison.md) links every claim to its source.
+while you work. claude-mem captures more with less effort and supports more agents.
+
+In a [side-by-side benchmark](docs/comparison.md#memory-benchmark) (conventions taught in one
+session, checked in the next four), culi applied every convention in every completed session and
+claude-mem applied 9 of 11, at about 10% versus 40% above the no-memory session cost. It is a small
+benchmark, one fixture and at most two runs per arm; the page states its limits and links every
+claim to its source.
 
 ## Quick start
 
@@ -146,7 +151,7 @@ and manual learning commands.
 - [Learning and cost](docs/learning.md) — providers, auth, Codex recovery, caps, and troubleshooting.
 - [Configuration](docs/configuration.md) — complete `config.yaml` reference and safe console settings.
 - [Retrieval evaluation](docs/evaluation.md) — `culi eval`, the bundled suite, results and known misses.
-- [culi and claude-mem](docs/comparison.md) — a sourced comparison and the benchmark method.
+- [culi and claude-mem](docs/comparison.md) — a sourced comparison, a memory benchmark, and the method.
 - [Product vision](docs/VISION.md) — principles and future direction.
 
 ## Common commands
