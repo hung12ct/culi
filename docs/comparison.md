@@ -33,33 +33,45 @@ Facts about claude-mem come from its own package and README at
 
 ## Memory benchmark
 
-Does knowledge from one session reach the next ones? A small Go repo has four conventions that
-cannot be inferred from its code: run tests only with `make verify`, wrap errors with
-`inverr.Wrap`, store money as `int64` cents, start new files with an SPDX header. Session 1 asks
-for a change and states the conventions. Sessions 2–5 ask for unrelated changes and never mention
-them; each applicable convention is checked automatically from the session's commands and diff
-(11 checks per run). Every arm runs in its own `HOME` with `claude -p`, Sonnet 5.5, and Claude
-Code's built-in auto-memory disabled, except the arm that measures that feature alone.
+Does knowledge from one session reach the next ones? Each fixture is a small Go repo with
+conventions its code does not reveal. Session 1 asks for a change and states the conventions;
+sessions 2–5 ask for unrelated changes and never mention them. Each applicable convention is
+checked automatically from the session's commands and diff.
 
-| Arm (2026-11-04) | Conventions applied in sessions 2–5 | Avg. session cost | Tool's own model calls (5 sessions) |
-|---|---|---|---|
-| No memory | 2/11, 3/11 | $0.063 | 0 |
-| Claude Code auto-memory only | 5/11, 4/11 | $0.067 | built in |
-| claude-mem 15.9.0 | 9/11 (one valid run) | $0.090 | 29 observer turns, ~338k context tokens |
-| culi v0.8.0 | 3/11 | $0.064 | 2 |
-| culi with this change | 8/8 (session 5 lost to a quota error), 11/11 | $0.070 | 1–2 |
+- **Fixture A** (inventory, 11 checks per run): run tests only with `make verify`, wrap errors with
+  `inverr.Wrap`, store money as `int64` cents, start new files with an SPDX header.
+- **Fixture B** (billing, 10 checks per run): exported functions take `ctx` first, tests are
+  table-driven, log only through `logx`, no new dependencies. Agents often write table-driven tests
+  and use `logx` unprompted, so here `ctx` is the check that separates the arms.
+
+Every arm runs in its own `HOME` with `claude -p`, Sonnet 5.5, and Claude Code's built-in
+auto-memory disabled, except the arm that measures that feature alone.
+
+| Arm (2026-11-04) | Fixture A | Fixture B | All checks | Avg. session cost |
+|---|---|---|---|---|
+| No memory | 10/33 (3 runs) | 11/20 (2 runs) | 21/53 (40%) | $0.068 |
+| Claude Code auto-memory only | 9/22 (2 runs) | 10/10 (1 run) | 19/32 (59%) | $0.071 |
+| claude-mem 15.9.0 | 25/33 (3 runs) | 16/20 (2 runs) | 41/53 (77%) | $0.095 |
+| culi v0.8.0 | 3/11 (1 run) | — | 3/11 (27%) | $0.064 |
+| culi v0.8.1 | 41/41 (4 runs) | 20/20 (2 runs) | 61/61 (100%) | $0.072 |
+
+One culi run lost its last session to a quota error, so it contributes 8 checks instead of 11;
+one of its four fixture-A runs used the same code before it was tagged v0.8.1.
 
 | Measured on the same machine | culi | claude-mem 15.9.0 |
 |---|---|---|
 | Install | 3–6 s, 16 MB | 83 s, 1.8 GB (1.2 GB without the npm cache) |
 | `UserPromptSubmit` hook, p50 / p95 | 44 / 50 ms | 218 / 419 ms |
 | Hook before every `Read`/`Bash`/`Grep`/`Glob` | none | 194 / 199 ms |
+| Model calls by the tool itself, per 5 sessions | 1–2 | 22–31 observer turns, 200–330k context tokens |
 
-Read the numbers with their limits: one fixture, two runs per arm at most, and an agent that
-varies run to run. claude-mem's second run is excluded because its observer paused itself at 96%
-of the weekly Claude quota (a deliberate guard, not a failure), so it has one valid run. Its
-observer also reads credentials only from the Claude Code credential store, so the sandbox needed
-a `.credentials.json` holding the same token the session used.
+Read the numbers with their limits: two small fixtures, at most four runs per arm, automatic
+checks only, and an agent that varies run to run. One claude-mem run was excluded because its
+observer paused itself at 96% of the weekly Claude quota (a deliberate guard, not a failure). Its
+observer reads credentials only from the Claude Code credential store, so each sandbox needed a
+`.credentials.json` holding the same token the session used. culi wins this benchmark because it
+turns stated conventions into rules injected at every session start; claude-mem recalls them from
+its observations, which usually works but not always.
 
 ## Where claude-mem is the better choice
 
